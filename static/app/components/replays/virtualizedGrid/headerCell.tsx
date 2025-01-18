@@ -32,7 +32,7 @@ function CatchClicks({children}: {children: ReactNode}) {
 
 function HeaderCell(
   {field, handleSort, label, sortConfig, style, tooltipTitle}: Props<BaseRecord>,
-  ref
+  ref: any
 ) {
   return (
     <HeaderButton style={style} onClick={() => handleSort(field)} ref={ref}>
@@ -59,7 +59,7 @@ const HeaderButton = styled('button')`
   color: ${p => p.theme.subText};
 
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
   line-height: 16px;
   text-align: unset;
   text-transform: uppercase;

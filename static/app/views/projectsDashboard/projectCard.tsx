@@ -4,7 +4,7 @@ import round from 'lodash/round';
 
 import {loadStatsForProject} from 'sentry/actionCreators/projects';
 import type {Client} from 'sentry/api';
-import {Button} from 'sentry/components/button';
+import {LinkButton} from 'sentry/components/button';
 import IdBadge from 'sentry/components/idBadge';
 import Link from 'sentry/components/links/link';
 import Panel from 'sentry/components/panels/panel';
@@ -18,17 +18,18 @@ import ScoreCard, {
   Title,
   Trend,
 } from 'sentry/components/scoreCard';
-import {releaseHealth} from 'sentry/data/platformCategories';
 import {IconArrow, IconSettings} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import ProjectsStatsStore from 'sentry/stores/projectsStatsStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {defined} from 'sentry/utils';
 import {DiscoverDatasets} from 'sentry/utils/discover/types';
 import {formatAbbreviatedNumber} from 'sentry/utils/formatters';
 import withApi from 'sentry/utils/withApi';
 import withOrganization from 'sentry/utils/withOrganization';
+import {getPerformanceBaseUrl} from 'sentry/views/performance/utils';
 import MissingReleasesButtons from 'sentry/views/projectDetail/missingFeatureButtons/missingReleasesButtons';
 import {
   CRASH_FREE_DECIMAL_THRESHOLD,
@@ -80,26 +81,15 @@ class ProjectCard extends Component<Props> {
 
   renderMissingFeatureCard() {
     const {organization, project} = this.props;
-    if (project.platform && releaseHealth.includes(project.platform)) {
-      return (
-        <ScoreCard
-          title={t('Crash Free Sessions')}
-          score={<MissingReleasesButtons organization={organization} health />}
-        />
-      );
-    }
-
     return (
       <ScoreCard
         title={t('Crash Free Sessions')}
         score={
-          <NotAvailable>
-            {t('Not Available')}
-            <QuestionTooltip
-              title={t('Release Health is not yet supported on this platform.')}
-              size="xs"
-            />
-          </NotAvailable>
+          <MissingReleasesButtons
+            organization={organization}
+            health
+            platform={project.platform}
+          />
         }
       />
     );
@@ -149,6 +139,7 @@ class ProjectCard extends Component<Props> {
                 borderless
                 size="zero"
                 icon={<IconSettings color="subText" />}
+                title={t('Settings')}
                 aria-label={t('Settings')}
                 to={`/settings/${organization.slug}/projects/${slug}/`}
               />
@@ -168,7 +159,7 @@ class ProjectCard extends Component<Props> {
                       <em>|</em>
                       <TransactionsLink
                         data-test-id="project-transactions"
-                        to={`/organizations/${organization.slug}/performance/?project=${project.id}`}
+                        to={`${getPerformanceBaseUrl(organization.slug)}/?project=${project.id}`}
                       >
                         {t(
                           'Transactions: %s',
@@ -273,7 +264,7 @@ class ProjectCardContainer extends Component<ContainerProps, ContainerState> {
   }
 
   listeners = [
-    ProjectsStatsStore.listen(itemsBySlug => {
+    ProjectsStatsStore.listen((itemsBySlug: any) => {
       this.onProjectStatsStoreUpdate(itemsBySlug);
     }, undefined),
   ];
@@ -290,7 +281,7 @@ class ProjectCardContainer extends Component<ContainerProps, ContainerState> {
     }
 
     this.setState({
-      projectDetails: itemsBySlug[project.slug],
+      projectDetails: itemsBySlug[project.slug]!,
     });
   }
 
@@ -319,11 +310,13 @@ const CardHeader = styled('div')`
   height: 32px;
 `;
 
-const SettingsButton = styled(Button)`
+const SettingsButton = styled(LinkButton)`
   margin-left: auto;
   margin-top: -${space(0.5)};
   padding: 3px;
   border-radius: 50%;
+  width: 24px;
+  height: 24px;
 `;
 
 const StyledBookmarkStar = styled(BookmarkStar)`
@@ -408,7 +401,7 @@ const DeploysWrapper = styled('div')`
 
 const ReleaseTitle = styled('span')`
   color: ${p => p.theme.gray300};
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 
 const StyledIdBadge = styled(IdBadge)`
@@ -431,7 +424,7 @@ const SummaryLinks = styled('div')`
   position: relative;
   top: -${space(2)};
   align-items: center;
-  font-weight: 400;
+  font-weight: ${p => p.theme.fontWeightNormal};
 
   color: ${p => p.theme.subText};
   font-size: ${p => p.theme.fontSizeSmall};
@@ -459,15 +452,6 @@ const TransactionsLink = styled(Link)`
   > span {
     margin-left: ${space(0.5)};
   }
-`;
-
-const NotAvailable = styled('div')`
-  font-size: ${p => p.theme.fontSizeMedium};
-  font-weight: normal;
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: ${space(0.5)};
-  align-items: center;
 `;
 
 const SummaryLinkPlaceholder = styled(Placeholder)`

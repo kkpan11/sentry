@@ -1,7 +1,6 @@
 from contextlib import contextmanager
 
 import sentry_sdk
-from django.utils.datastructures import MultiValueDict
 from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ParseError
 from rest_framework.request import Request
@@ -45,7 +44,7 @@ class OrganizationSessionsEndpoint(OrganizationEndpoint):
             GlobalParams.START,
             GlobalParams.END,
             GlobalParams.ENVIRONMENT,
-            GlobalParams.ORG_SLUG,
+            GlobalParams.ORG_ID_OR_SLUG,
             GlobalParams.STATS_PERIOD,
             OrganizationParams.PROJECT,
             SessionsParams.FIELD,
@@ -66,21 +65,23 @@ class OrganizationSessionsEndpoint(OrganizationEndpoint):
     )
     def get(self, request: Request, organization) -> Response:
         """
-        Returns a time series of release health session statistics for projects bound to an "
-        "organization.\n\nThe interval and date range are subject to certain restrictions and rounding "
-        "rules.\n\nThe date range is rounded to align with the interval, and is rounded to at least one "
-        "hour. The interval can at most be one day and at least one hour currently. It has to cleanly "
-        "divide one day, for rounding reasons.\n\nBecause of technical limitations, this endpoint returns "
-        "at most 10000 data points. For example, if you select a 90 day window grouped by releases, "
-        "you will see at most `floor(10k / (90 + 1)) = 109` releases. To get more results, reduce the "
-        "`statsPeriod`."
+        Returns a time series of release health session statistics for projects bound to an organization.
+
+        The interval and date range are subject to certain restrictions and rounding rules.
+
+        The date range is rounded to align with the interval, and is rounded to at least one
+        hour. The interval can at most be one day and at least one hour currently. It has to cleanly
+        divide one day, for rounding reasons.
+
+        Because of technical limitations, this endpoint returns
+        at most 10000 data points. For example, if you select a 90 day window grouped by releases,
+        you will see at most `floor(10k / (90 + 1)) = 109` releases. To get more results, reduce the
+        `statsPeriod`.
         """
 
         def data_fn(offset: int, limit: int) -> SessionsQueryResult:
             with self.handle_query_errors():
-                with sentry_sdk.start_span(
-                    op="sessions.endpoint", description="build_sessions_query"
-                ):
+                with sentry_sdk.start_span(op="sessions.endpoint", name="build_sessions_query"):
                     request_limit = None
                     if request.GET.get("per_page") is not None:
                         request_limit = limit
@@ -115,15 +116,10 @@ class OrganizationSessionsEndpoint(OrganizationEndpoint):
         except NoProjects:
             raise NoProjects("No projects available")  # give it a description
 
-        # HACK to prevent front-end crash when release health is sessions-based:
-        query_params = MultiValueDict(request.GET)
-        if not release_health.backend.is_metrics_based() and request.GET.get("interval") == "10s":
-            query_params["interval"] = "1m"
-
         query_config = release_health.backend.sessions_query_config(organization)
 
         return QueryDefinition(
-            query=query_params,
+            query=request.GET,
             params=params,
             offset=offset,
             limit=limit,

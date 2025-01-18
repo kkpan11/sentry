@@ -1,15 +1,14 @@
-import {useContext} from 'react';
 import omit from 'lodash/omit';
 
 import type {Client} from 'sentry/api';
 import {isMultiSeriesStats} from 'sentry/components/charts/utils';
+import type {PageFilters} from 'sentry/types/core';
+import type {Series} from 'sentry/types/echarts';
 import type {
   EventsStats,
   MultiSeriesEventsStats,
   Organization,
-  PageFilters,
-} from 'sentry/types';
-import type {Series} from 'sentry/types/echarts';
+} from 'sentry/types/organization';
 import type {EventsTableData, TableData} from 'sentry/utils/discover/discoverQuery';
 import {DURATION_UNITS, SIZE_UNITS} from 'sentry/utils/discover/fieldRenderers';
 import {getAggregateAlias} from 'sentry/utils/discover/fields';
@@ -17,11 +16,11 @@ import type {MetricsResultsMetaMapKey} from 'sentry/utils/performance/contexts/m
 import {useMetricsResultsMeta} from 'sentry/utils/performance/contexts/metricsEnhancedPerformanceDataContext';
 import {useMEPSettingContext} from 'sentry/utils/performance/contexts/metricsEnhancedSetting';
 import {OnDemandControlConsumer} from 'sentry/utils/performance/contexts/onDemandControl';
+import {getDatasetConfig} from 'sentry/views/dashboards/datasetConfig/base';
 
-import {ErrorsAndTransactionsConfig} from '../datasetConfig/errorsAndTransactions';
-import type {DashboardFilters, Widget} from '../types';
+import {type DashboardFilters, type Widget, WidgetType} from '../types';
 
-import {DashboardsMEPContext} from './dashboardsMEPContext';
+import {useDashboardsMEPContext} from './dashboardsMEPContext';
 import type {
   GenericWidgetQueriesChildrenProps,
   OnDataFetchedProps,
@@ -40,6 +39,7 @@ export function transformSeries(
 ): Series {
   const unit = stats.meta?.units?.[getAggregateAlias(field)];
   // Scale series values to milliseconds or bytes depending on units from meta
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   const scale = (unit && (DURATION_UNITS[unit] ?? SIZE_UNITS[unit])) ?? 1;
   return {
     seriesName,
@@ -79,14 +79,19 @@ export function flattenMultiSeriesDataWithGrouping(
 
   groupNames.forEach(groupName => {
     // Each group contains an order key which we should ignore
-    const aggregateNames = Object.keys(omit(result[groupName], 'order'));
+    const aggregateNames = Object.keys(
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      omit(result[groupName], ['order', 'isMetricsExtractedData'])
+    );
 
     aggregateNames.forEach(aggregate => {
       const seriesName = `${groupName} : ${aggregate}`;
       const prefixedName = queryAlias ? `${queryAlias} > ${seriesName}` : seriesName;
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       const seriesData: EventsStats = result[groupName][aggregate];
 
       seriesWithOrdering.push([
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         result[groupName].order || 0,
         transformSeries(seriesData, prefixedName, seriesName),
       ]);
@@ -117,6 +122,7 @@ type Props = {
   dashboardFilters?: DashboardFilters;
   limit?: number;
   onDataFetched?: (results: OnDataFetchedProps) => void;
+  onWidgetSplitDecision?: (splitDecision: WidgetType) => void;
 };
 
 function WidgetQueries({
@@ -129,9 +135,13 @@ function WidgetQueries({
   cursor,
   limit,
   onDataFetched,
+  onWidgetSplitDecision,
 }: Props) {
-  const config = ErrorsAndTransactionsConfig;
-  const context = useContext(DashboardsMEPContext);
+  // Discover and Errors datasets are the only datasets processed in this component
+  const config = getDatasetConfig(
+    widget.widgetType as WidgetType.DISCOVER | WidgetType.ERRORS | WidgetType.TRANSACTIONS
+  );
+  const context = useDashboardsMEPContext();
   const metricsMeta = useMetricsResultsMeta();
   const mepSettingContext = useMEPSettingContext();
 
@@ -163,6 +173,7 @@ function WidgetQueries({
       );
     } else {
       Object.keys(rawResults).forEach(key => {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         const rawResult: EventsStats = rawResults[key];
         if (rawResult.isMetricsData !== undefined) {
           isSeriesMetricsDataResults.push(rawResult.isMetricsData);
@@ -184,6 +195,23 @@ function WidgetQueries({
       isSeriesMetricsExtractedDataResults.every(Boolean) &&
         isSeriesMetricsExtractedDataResults.some(Boolean)
     );
+
+    const resultValues = Object.values(rawResults);
+    if (organization.features.includes('performance-discover-dataset-selector')) {
+      let splitDecision: WidgetType | undefined = undefined;
+      if (rawResults.meta) {
+        splitDecision = (rawResults.meta as EventsStats['meta'])?.discoverSplitDecision;
+      } else if (Object.values(rawResults).length > 0) {
+        // Multi-series queries will have a meta key on each series
+        // We can just read the decision from one.
+        splitDecision = resultValues[0]?.meta?.discoverSplitDecision;
+      }
+
+      if (splitDecision) {
+        // Update the dashboard state with the split decision
+        onWidgetSplitDecision?.(splitDecision);
+      }
+    }
   };
 
   const isTableMetricsDataResults: boolean[] = [];
@@ -202,6 +230,16 @@ function WidgetQueries({
       isTableMetricsExtractedDataResults.every(Boolean) &&
         isTableMetricsExtractedDataResults.some(Boolean)
     );
+
+    if (
+      organization.features.includes('performance-discover-dataset-selector') &&
+      [WidgetType.ERRORS, WidgetType.TRANSACTIONS].includes(
+        rawResults?.meta?.discoverSplitDecision
+      )
+    ) {
+      // Update the dashboard state with the split decision
+      onWidgetSplitDecision?.(rawResults?.meta?.discoverSplitDecision);
+    }
   };
 
   return (

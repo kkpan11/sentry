@@ -1,5 +1,7 @@
+import type {LocationDescriptor} from 'history';
+
+import type {SearchGroup} from 'sentry/components/deprecatedSmartSearchBar/types';
 import type {TitledPlugin} from 'sentry/components/group/pluginActions';
-import type {SearchGroup} from 'sentry/components/smartSearchBar/types';
 import type {FieldKind} from 'sentry/utils/fields';
 
 import type {Actor, TimeseriesValue} from './core';
@@ -54,14 +56,18 @@ export enum SavedSearchType {
   SESSION = 2,
   REPLAY = 3,
   METRIC = 4,
+  SPAN = 5,
+  ERROR = 6,
+  TRANSACTION = 7,
 }
 
 export enum IssueCategory {
   PERFORMANCE = 'performance',
   ERROR = 'error',
   CRON = 'cron',
-  PROFILE = 'profile',
   REPLAY = 'replay',
+  UPTIME = 'uptime',
+  METRIC_ALERT = 'metric_alert',
 }
 
 export enum IssueType {
@@ -95,9 +101,22 @@ export enum IssueType {
 
   // Replay
   REPLAY_RAGE_CLICK = 'replay_click_rage',
+  REPLAY_HYDRATION_ERROR = 'replay_hydration_error',
 }
 
+// Update this if adding an issue type that you don't want to show up in search!
+export const VISIBLE_ISSUE_TYPES = Object.values(IssueType).filter(
+  type =>
+    ![
+      IssueType.PROFILE_FRAME_DROP_EXPERIMENTAL,
+      IssueType.PROFILE_FUNCTION_REGRESSION_EXPERIMENTAL,
+    ].includes(type)
+);
+
 export enum IssueTitle {
+  ERROR = 'Error',
+
+  // Performance
   PERFORMANCE_CONSECUTIVE_DB_QUERIES = 'Consecutive DB Queries',
   PERFORMANCE_CONSECUTIVE_HTTP = 'Consecutive HTTP',
   PERFORMANCE_FILE_IO_MAIN_THREAD = 'File IO on Main Thread',
@@ -110,6 +129,58 @@ export enum IssueTitle {
   PERFORMANCE_LARGE_HTTP_PAYLOAD = 'Large HTTP payload',
   PERFORMANCE_HTTP_OVERHEAD = 'HTTP/1.1 Overhead',
   PERFORMANCE_DURATION_REGRESSION = 'Duration Regression',
+  PERFORMANCE_ENDPOINT_REGRESSION = 'Endpoint Regression',
+
+  // Profile
+  PROFILE_FILE_IO_MAIN_THREAD = 'File I/O on Main Thread',
+  PROFILE_IMAGE_DECODE_MAIN_THREAD = 'Image Decoding on Main Thread',
+  PROFILE_JSON_DECODE_MAIN_THREAD = 'JSON Decoding on Main Thread',
+  PROFILE_REGEX_MAIN_THREAD = 'Regex on Main Thread',
+  PROFILE_FRAME_DROP = 'Frame Drop',
+  PROFILE_FUNCTION_REGRESSION = 'Function Regression',
+  PROFILE_FUNCTION_REGRESSION_EXPERIMENTAL = 'Function Duration Regression (Experimental)',
+
+  // Replay
+  REPLAY_RAGE_CLICK = 'Rage Click Detected',
+  REPLAY_HYDRATION_ERROR = 'Hydration Error Detected',
+}
+
+const ISSUE_TYPE_TO_ISSUE_TITLE = {
+  error: IssueTitle.ERROR,
+
+  performance_consecutive_db_queries: IssueTitle.PERFORMANCE_CONSECUTIVE_DB_QUERIES,
+  performance_consecutive_http: IssueTitle.PERFORMANCE_CONSECUTIVE_HTTP,
+  performance_file_io_main_thread: IssueTitle.PERFORMANCE_FILE_IO_MAIN_THREAD,
+  performance_db_main_thread: IssueTitle.PERFORMANCE_DB_MAIN_THREAD,
+  performance_n_plus_one_api_calls: IssueTitle.PERFORMANCE_N_PLUS_ONE_API_CALLS,
+  performance_n_plus_one_db_queries: IssueTitle.PERFORMANCE_N_PLUS_ONE_DB_QUERIES,
+  performance_slow_db_query: IssueTitle.PERFORMANCE_SLOW_DB_QUERY,
+  performance_render_blocking_asset_span: IssueTitle.PERFORMANCE_RENDER_BLOCKING_ASSET,
+  performance_uncompressed_assets: IssueTitle.PERFORMANCE_UNCOMPRESSED_ASSET,
+  performance_large_http_payload: IssueTitle.PERFORMANCE_LARGE_HTTP_PAYLOAD,
+  performance_http_overhead: IssueTitle.PERFORMANCE_HTTP_OVERHEAD,
+  performance_duration_regression: IssueTitle.PERFORMANCE_DURATION_REGRESSION,
+  performance_p95_endpoint_regression: IssueTitle.PERFORMANCE_ENDPOINT_REGRESSION,
+
+  profile_file_io_main_thread: IssueTitle.PROFILE_FILE_IO_MAIN_THREAD,
+  profile_image_decode_main_thread: IssueTitle.PROFILE_IMAGE_DECODE_MAIN_THREAD,
+  profile_json_decode_main_thread: IssueTitle.PROFILE_JSON_DECODE_MAIN_THREAD,
+  profile_regex_main_thread: IssueTitle.PROFILE_REGEX_MAIN_THREAD,
+  profile_frame_drop: IssueTitle.PROFILE_FRAME_DROP,
+  profile_frame_drop_experimental: IssueTitle.PROFILE_FRAME_DROP,
+  profile_function_regression: IssueTitle.PROFILE_FUNCTION_REGRESSION,
+  profile_function_regression_exp: IssueTitle.PROFILE_FUNCTION_REGRESSION_EXPERIMENTAL,
+
+  replay_click_rage: IssueTitle.REPLAY_RAGE_CLICK,
+  replay_hydration_error: IssueTitle.REPLAY_HYDRATION_ERROR,
+};
+
+export function getIssueTitleFromType(issueType: string): IssueTitle | undefined {
+  if (issueType in ISSUE_TYPE_TO_ISSUE_TITLE) {
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+    return ISSUE_TYPE_TO_ISSUE_TITLE[issueType];
+  }
+  return undefined;
 }
 
 const OCCURRENCE_TYPE_TO_ISSUE_TYPE = {
@@ -144,6 +215,7 @@ export function getIssueTypeFromOccurrenceType(
   if (!typeId) {
     return null;
   }
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   return OCCURRENCE_TYPE_TO_ISSUE_TYPE[typeId] ?? null;
 }
 
@@ -185,6 +257,7 @@ export type EventAttachment = IssueAttachment;
 export type Tag = {
   key: string;
   name: string;
+  alias?: string;
 
   isInput?: boolean;
 
@@ -196,6 +269,7 @@ export type Tag = {
   maxSuggestedValues?: number;
   predefined?: boolean;
   totalValues?: number;
+  uniqueValues?: number;
   /**
    * Usually values are strings, but a predefined tag can define its SearchGroups
    */
@@ -242,6 +316,11 @@ export type TagWithTopValues = {
 /**
  * Inbox, issue owners and Activity
  */
+export type Annotation = {
+  displayName: string;
+  url: string;
+};
+
 export type InboxReasonDetails = {
   count?: number | null;
   until?: string | null;
@@ -323,6 +402,7 @@ export enum GroupActivityType {
   AUTO_SET_ONGOING = 'auto_set_ongoing',
   SET_ESCALATING = 'set_escalating',
   SET_PRIORITY = 'set_priority',
+  DELETED_ATTACHMENT = 'deleted_attachment',
 }
 
 interface GroupActivityBase {
@@ -342,7 +422,7 @@ export interface GroupActivityNote extends GroupActivityBase {
 }
 
 interface GroupActivitySetResolved extends GroupActivityBase {
-  data: Record<string, unknown>;
+  data: {};
   type: GroupActivityType.SET_RESOLVED;
 }
 
@@ -365,7 +445,7 @@ interface GroupActivitySetResolvedIntegration extends GroupActivityBase {
 }
 
 interface GroupActivitySetUnresolved extends GroupActivityBase {
-  data: Record<string, unknown>;
+  data: {};
   type: GroupActivityType.SET_UNRESOLVED;
 }
 
@@ -577,8 +657,14 @@ export interface GroupActivityCreateIssue extends GroupActivityBase {
     location: string;
     provider: string;
     title: string;
+    new?: boolean;
   };
   type: GroupActivityType.CREATE_ISSUE;
+}
+
+interface GroupActivityDeletedAttachment extends GroupActivityBase {
+  data: {};
+  type: GroupActivityType.DELETED_ATTACHMENT;
 }
 
 export type GroupActivity =
@@ -608,7 +694,8 @@ export type GroupActivity =
   | GroupActivityCreateIssue
   | GroupActivityAutoSetOngoing
   | GroupActivitySetEscalating
-  | GroupActivitySetPriority;
+  | GroupActivitySetPriority
+  | GroupActivityDeletedAttachment;
 
 export type Activity = GroupActivity;
 
@@ -652,6 +739,7 @@ export interface ResolvedStatusDetails {
   };
   inNextRelease?: boolean;
   inRelease?: string;
+  inUpcomingRelease?: boolean;
   repository?: string;
 }
 interface ReprocessingStatusDetails {
@@ -712,7 +800,7 @@ export const enum PriorityLevel {
 // TODO(ts): incomplete
 export interface BaseGroup {
   activity: GroupActivity[];
-  annotations: string[];
+  annotations: Annotation[];
   assignedTo: Actor | null;
   culprit: string;
   firstSeen: string;
@@ -735,6 +823,7 @@ export interface BaseGroup {
   pluginContexts: any[]; // TODO(ts)
   pluginIssues: TitledPlugin[];
   priority: PriorityLevel;
+  priorityLockedAt: string | null;
   project: Project;
   seenBy: User[];
   shareId: string;
@@ -748,9 +837,18 @@ export interface BaseGroup {
   inbox?: InboxDetails | null | false;
   integrationIssues?: ExternalIssue[];
   latestEvent?: Event;
+  latestEventHasAttachments?: boolean;
+  openPeriods?: GroupOpenPeriod[] | null;
   owners?: SuggestedOwner[] | null;
   sentryAppIssues?: PlatformExternalIssue[];
   substatus?: GroupSubstatus | null;
+}
+
+export interface GroupOpenPeriod {
+  duration: string;
+  end: string;
+  isOpen: boolean;
+  start: string;
 }
 
 export interface GroupReprocessing extends BaseGroup, GroupStats {
@@ -787,36 +885,6 @@ export interface GroupTombstone {
 export interface GroupTombstoneHelper extends GroupTombstone {
   isTombstone: true;
 }
-
-export type ProcessingIssueItem = {
-  checksum: string;
-  data: {
-    // TODO(ts) This type is likely incomplete, but this is what
-    // project processing issues settings uses.
-    _scope: string;
-    image_arch: string;
-    image_path: string;
-    image_uuid: string;
-    dist?: string;
-    release?: string;
-  };
-  id: string;
-  lastSeen: string;
-  numEvents: number;
-  type: string;
-};
-
-export type ProcessingIssue = {
-  hasIssues: boolean;
-  hasMoreResolveableIssues: boolean;
-  issuesProcessing: number;
-  lastSeen: string;
-  numIssues: number;
-  project: string;
-  resolveableIssues: number;
-  signedLink: string;
-  issues?: ProcessingIssueItem[];
-};
 
 /**
  * Datascrubbing
@@ -856,13 +924,21 @@ export type UserReport = {
 export type KeyValueListDataItem = {
   key: string;
   subject: string;
+  action?: {
+    link?: string | LocationDescriptor;
+  };
   actionButton?: React.ReactNode;
+  /**
+   * If true, the action button will always be visible, not just on hover.
+   */
+  actionButtonAlwaysVisible?: boolean;
   isContextData?: boolean;
   isMultiValue?: boolean;
   meta?: Meta;
   subjectDataTestId?: string;
   subjectIcon?: React.ReactNode;
-  value?: React.ReactNode;
+  subjectNode?: React.ReactNode;
+  value?: React.ReactNode | Record<string, string | number>;
 };
 
 export type KeyValueListData = KeyValueListDataItem[];

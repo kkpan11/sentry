@@ -4,7 +4,7 @@ import merge from 'lodash/merge';
 
 import {openModal} from 'sentry/actionCreators/modal';
 import {Alert} from 'sentry/components/alert';
-import {Button} from 'sentry/components/button';
+import {Button, LinkButton} from 'sentry/components/button';
 import SelectControl from 'sentry/components/forms/controls/selectControl';
 import Input from 'sentry/components/input';
 import ExternalLink from 'sentry/components/links/externalLink';
@@ -13,7 +13,6 @@ import {releaseHealth} from 'sentry/data/platformCategories';
 import {IconDelete, IconSettings} from 'sentry/icons';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Choices, Organization, Project} from 'sentry/types';
 import type {
   IssueAlertConfiguration,
   IssueAlertRuleAction,
@@ -26,6 +25,9 @@ import {
   IssueAlertFilterType,
   MailActionTargetType,
 } from 'sentry/types/alerts';
+import type {Choices} from 'sentry/types/core';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import MemberTeamFields from 'sentry/views/alerts/rules/issue/memberTeamFields';
 import SentryAppRuleModal from 'sentry/views/alerts/rules/issue/sentryAppRuleModal';
 import TicketRuleModal from 'sentry/views/alerts/rules/issue/ticketRuleModal';
@@ -52,7 +54,10 @@ function NumberField({
   fieldConfig,
   onPropertyChange,
 }: FieldProps) {
-  const value = data[name] && typeof data[name] !== 'boolean' ? Number(data[name]) : NaN;
+  const value =
+    (data[name] && typeof data[name] !== 'boolean') || data[name] === 0
+      ? Number(data[name])
+      : NaN;
 
   // Set default value of number fields to the placeholder value
   useEffect(() => {
@@ -158,6 +163,7 @@ function ChoiceField({
   // All `value`s are cast to string
   // There are integrations that give the form field choices with the value as number, but
   // when the integration configuration gets saved, it gets saved and returned as a string
+  // @ts-ignore TS(7031): Binding element 'value' implicitly has an 'any' ty... Remove this comment to see the full error message
   const options = fieldConfig.choices.map(([value, label]) => ({
     value: `${value}`,
     label,
@@ -338,7 +344,8 @@ function RuleNode({
       return (
         <Separator key={key}>
           {node.formFields?.hasOwnProperty(key)
-            ? getField(key, node.formFields[key])
+            ? // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+              getField(key, node.formFields[key])
             : part}
         </Separator>
       );
@@ -455,13 +462,13 @@ function RuleNode({
           type="info"
           showIcon
           trailingItems={
-            <Button
+            <LinkButton
               href="https://docs.sentry.io/product/integrations/notification-incidents/slack/#rate-limiting-error"
               external
               size="xs"
             >
               {t('Learn More')}
-            </Button>
+            </LinkButton>
           }
         >
           {t('Having rate limiting problems? Enter a channel or user ID.')}
@@ -475,13 +482,13 @@ function RuleNode({
           type="info"
           showIcon
           trailingItems={
-            <Button
+            <LinkButton
               href="https://docs.sentry.io/product/accounts/early-adopter-features/discord/#issue-alerts"
               external
               size="xs"
             >
               {t('Learn More')}
-            </Button>
+            </LinkButton>
           }
         >
           {t('Note that you must enter a Discord channel ID, not a channel name.')}

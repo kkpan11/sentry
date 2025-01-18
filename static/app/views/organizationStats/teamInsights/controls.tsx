@@ -1,9 +1,8 @@
-import type {RouteComponentProps} from 'react-router';
 import {useTheme} from '@emotion/react';
 import styled from '@emotion/styled';
 import type {LocationDescriptorObject} from 'history';
 import pick from 'lodash/pick';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 import SelectControl from 'sentry/components/forms/controls/selectControl';
 import TeamSelector from 'sentry/components/teamSelector';
@@ -11,7 +10,9 @@ import type {ChangeData} from 'sentry/components/timeRangeSelector';
 import {TimeRangeSelector} from 'sentry/components/timeRangeSelector';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {DateString, TeamWithProjects} from 'sentry/types';
+import type {DateString} from 'sentry/types/core';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {TeamWithProjects} from 'sentry/types/project';
 import {uniq} from 'sentry/utils/array/uniq';
 import {isActiveSuperuser} from 'sentry/utils/isActiveSuperuser';
 import localStorage from 'sentry/utils/localStorage';
@@ -135,13 +136,13 @@ function TeamStatsControls({
 
   return (
     <ControlsWrapper showEnvironment={showEnvironment}>
-      <StyledTeamSelector
+      <TeamSelector
         name="select-team"
         inFieldLabel={t('Team: ')}
         value={currentTeam?.slug}
-        onChange={choice => handleChangeTeam(choice.actor.id)}
+        onChange={(choice: any) => handleChangeTeam(choice.actor.id)}
         teamFilter={
-          isSuperuser || isOrgOwner ? undefined : filterTeam => filterTeam.isMember
+          isSuperuser || isOrgOwner ? undefined : (filterTeam: any) => filterTeam.isMember
         }
         styles={{
           singleValue(provided: any) {
@@ -228,6 +229,7 @@ function TeamStatsControls({
         onChange={handleUpdateDatetime}
         showAbsolute={false}
         relativeOptions={relativeOptions}
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         triggerLabel={period && relativeOptions[period]}
         triggerProps={{prefix: t('Date Range')}}
       />
@@ -245,12 +247,6 @@ const ControlsWrapper = styled('div')<{showEnvironment?: boolean}>`
 
   @media (min-width: ${p => p.theme.breakpoints.small}) {
     grid-template-columns: 246px ${p => (p.showEnvironment ? '246px' : '')} 1fr;
-  }
-`;
-
-const StyledTeamSelector = styled(TeamSelector)`
-  & > div {
-    box-shadow: ${p => p.theme.dropShadowMedium};
   }
 `;
 

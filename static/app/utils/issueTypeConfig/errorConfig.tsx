@@ -1,12 +1,13 @@
 import {Fragment} from 'react';
 
 import {t, tct} from 'sentry/locale';
-import type {PlatformKey, Project} from 'sentry/types';
+import type {PlatformKey, Project} from 'sentry/types/project';
 import type {
   IssueCategoryConfigMapping,
   IssueTypeConfig,
 } from 'sentry/utils/issueTypeConfig/types';
 import {ErrorHelpType} from 'sentry/utils/issueTypeConfig/types';
+import isHydrationError from 'sentry/utils/react/isHydrationError';
 
 export const errorConfig: IssueCategoryConfigMapping = {
   _categoryDefaults: {
@@ -16,21 +17,25 @@ export const errorConfig: IssueCategoryConfigMapping = {
       deleteAndDiscard: {enabled: true},
       ignore: {enabled: true},
       merge: {enabled: true},
+      resolve: {enabled: true},
       resolveInRelease: {enabled: true},
       share: {enabled: true},
     },
     attachments: {enabled: true},
+    autofix: true,
+    logLevel: {enabled: true},
     mergedIssues: {enabled: true},
     replays: {enabled: true},
     similarIssues: {enabled: true},
     userFeedback: {enabled: true},
     usesIssuePlatform: false,
+    issueSummary: {enabled: true},
   },
 };
 
 type ErrorInfo = {
   errorHelpType: ErrorHelpType;
-  errorTitle: string | RegExp;
+  errorTitle: string | RegExp | ((title: string) => boolean);
   projectPlatforms: PlatformKey[];
 };
 
@@ -61,8 +66,7 @@ const ErrorInfoChecks: Array<ErrorInfo> = [
     errorHelpType: ErrorHelpType.DYNAMIC_SERVER_USAGE,
   },
   {
-    errorTitle:
-      /(does not match server-rendered HTML|Hydration failed because|error while hydrating)/i,
+    errorTitle: isHydrationError,
     projectPlatforms: ['javascript-nextjs'],
     errorHelpType: ErrorHelpType.HYDRATION_ERROR,
   },
@@ -365,7 +369,9 @@ export function getErrorHelpResource({
     const shouldShowCustomResource =
       typeof errorTitle === 'string'
         ? title.includes(errorTitle)
-        : title.match(errorTitle);
+        : errorTitle instanceof RegExp
+          ? errorTitle.test(title)
+          : errorTitle(title);
 
     if (shouldShowCustomResource) {
       // Issues without a platform will never have a custom "Sentry Answers" resource

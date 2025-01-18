@@ -12,9 +12,11 @@ import LineSeries from 'sentry/components/charts/series/lineSeries';
 import {DEFAULT_STATS_PERIOD} from 'sentry/constants';
 import {CHART_PALETTE} from 'sentry/constants/chartPalette';
 import {space} from 'sentry/styles/space';
-import type {PageFilters} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
 import type {ReactEchartsRef, Series} from 'sentry/types/echarts';
 import theme from 'sentry/utils/theme';
+import {getAnomalyMarkerSeries} from 'sentry/views/alerts/rules/metric/utils/anomalyChart';
+import type {Anomaly} from 'sentry/views/alerts/types';
 import {
   ALERT_CHART_MIN_MAX_BUFFER,
   alertAxisFormatter,
@@ -39,7 +41,9 @@ type Props = DefaultProps & {
   resolveThreshold: MetricRule['resolveThreshold'];
   thresholdType: MetricRule['thresholdType'];
   triggers: Trigger[];
+  anomalies?: Anomaly[];
   comparisonSeriesName?: string;
+  includePrevious?: boolean;
   isExtrapolatedData?: boolean;
   maxValue?: number;
   minValue?: number;
@@ -316,6 +320,7 @@ export default class ThresholdsChart extends PureComponent<Props, State> {
       comparisonMarkLines,
       minutesThresholdToDisplaySeconds,
       thresholdType,
+      anomalies = [],
     } = this.props;
 
     const dataWithoutRecentBucket = data?.map(({data: eventData, ...restOfData}) => {
@@ -369,15 +374,18 @@ export default class ThresholdsChart extends PureComponent<Props, State> {
             ? seriesParamsOrParam
             : [seriesParamsOrParam];
 
-          const pointY = (
-            seriesParams.length > 1 ? seriesParams[0].data[1] : undefined
-          ) as number | undefined;
+          const pointY =
+            // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+            (seriesParams.length > 1 ? seriesParams[0]!.data[1] : undefined) as
+              | number
+              | undefined;
 
           const comparisonSeries =
             seriesParams.length > 1
               ? seriesParams.find(({seriesName: _sn}) => _sn === comparisonSeriesName)
               : undefined;
 
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           const comparisonPointY = comparisonSeries?.data[1] as number | undefined;
 
           if (
@@ -410,7 +418,7 @@ export default class ThresholdsChart extends PureComponent<Props, State> {
         max: this.state.yAxisMax ?? undefined,
         axisLabel: {
           formatter: (value: number) =>
-            alertAxisFormatter(value, data[0].seriesName, aggregate),
+            alertAxisFormatter(value, data[0]!.seriesName, aggregate),
         },
       },
     };
@@ -431,7 +439,11 @@ export default class ThresholdsChart extends PureComponent<Props, State> {
           ]),
         })}
         colors={CHART_PALETTE[0]}
-        series={[...dataWithoutRecentBucket, ...comparisonMarkLines]}
+        series={[
+          ...dataWithoutRecentBucket,
+          ...comparisonMarkLines,
+          ...getAnomalyMarkerSeries(anomalies),
+        ]}
         additionalSeries={comparisonDataWithoutRecentBucket.map(
           ({data: _data, ...otherSeriesProps}) =>
             LineSeries({

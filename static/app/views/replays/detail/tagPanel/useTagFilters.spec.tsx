@@ -1,35 +1,30 @@
-import {browserHistory} from 'react-router';
 import type {Location} from 'history';
 import {ReplayRecordFixture} from 'sentry-fixture/replayRecord';
 
-import {reactHooks} from 'sentry-test/reactTestingLibrary';
+import {renderHook} from 'sentry-test/reactTestingLibrary';
 
 import {useLocation} from 'sentry/utils/useLocation';
 import type {FilterFields} from 'sentry/views/replays/detail/tagPanel/useTagFilters';
 import useTagFilters from 'sentry/views/replays/detail/tagPanel/useTagFilters';
 
-jest.mock('react-router');
 jest.mock('sentry/utils/useLocation');
+jest.mock('sentry/utils/useNavigate');
 
 const mockUseLocation = jest.mocked(useLocation);
 
 const tags = ReplayRecordFixture().tags;
 
 describe('useTagsFilters', () => {
-  beforeEach(() => {
-    jest.mocked(browserHistory.push).mockReset();
-  });
-
   it('should not filter anything when no values are set', () => {
     mockUseLocation.mockReturnValue({
       pathname: '/',
       query: {},
     } as Location<FilterFields>);
 
-    const {result} = reactHooks.renderHook(useTagFilters, {
+    const {result} = renderHook(useTagFilters, {
       initialProps: {tags},
     });
-    expect(Object.keys(result.current.items).length).toEqual(9);
+    expect(Object.keys(result.current.items)).toHaveLength(9);
   });
 
   it('should filter by searchTerm', () => {
@@ -40,7 +35,7 @@ describe('useTagsFilters', () => {
       },
     } as Location<FilterFields>);
 
-    const {result} = reactHooks.renderHook(useTagFilters, {
+    const {result} = renderHook(useTagFilters, {
       initialProps: {tags},
     });
     expect(result.current.items).toEqual({

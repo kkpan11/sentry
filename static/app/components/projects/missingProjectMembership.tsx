@@ -12,7 +12,8 @@ import {IconFlag} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import TeamStore from 'sentry/stores/teamStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import withApi from 'sentry/utils/withApi';
 
 type Props = {
@@ -125,14 +126,14 @@ class MissingProjectMembership extends Component<Props, State> {
     const teamAccess = [
       {
         label: t('Request Access'),
-        options: this.getTeamsForAccess()[0].map(request => ({
+        options: this.getTeamsForAccess()[0]!.map(request => ({
           value: request,
           label: `#${request}`,
         })),
       },
       {
         label: t('Pending Requests'),
-        options: this.getTeamsForAccess()[1].map(pending =>
+        options: this.getTeamsForAccess()[1]!.map(pending =>
           this.getPendingTeamOption(pending)
         ),
       },
@@ -159,7 +160,7 @@ class MissingProjectMembership extends Component<Props, State> {
                   name="select"
                   placeholder={t('Select a Team')}
                   options={teamAccess}
-                  onChange={teamObj => {
+                  onChange={(teamObj: any) => {
                     const team = teamObj ? teamObj.value : null;
                     this.setState({team});
                   }}

@@ -1,9 +1,11 @@
 import {t} from 'sentry/locale';
 import type {MetricType} from 'sentry/types/metrics';
-import {defined, formatBytesBase2, formatBytesBase10} from 'sentry/utils';
+import {defined} from 'sentry/utils';
+import {formatBytesBase2} from 'sentry/utils/bytes/formatBytesBase2';
+import {formatBytesBase10} from 'sentry/utils/bytes/formatBytesBase10';
 import {
   DAY,
-  formatNumberWithDynamicDecimalPoints,
+  formatAbbreviatedNumberWithDynamicPrecision,
   HOUR,
   MICROSECOND,
   MILLISECOND,
@@ -13,8 +15,9 @@ import {
   SECOND,
   WEEK,
 } from 'sentry/utils/formatters';
+import {formatNumberWithDynamicDecimalPoints} from 'sentry/utils/number/formatNumberWithDynamicDecimalPoints';
 
-const metricTypeToReadable: Record<MetricType, string> = {
+const metricTypeToReadable: Record<Exclude<MetricType, 'v'>, string> = {
   c: t('counter'),
   g: t('gauge'),
   d: t('distribution'),
@@ -24,6 +27,7 @@ const metricTypeToReadable: Record<MetricType, string> = {
 
 // Converts from "c" to "counter"
 export function getReadableMetricType(type?: string) {
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   return metricTypeToReadable[type as MetricType] ?? t('unknown');
 }
 
@@ -177,7 +181,7 @@ const METRIC_UNIT_TO_SHORT: Record<FormattingSupportedMetricUnit, string> = {
 };
 
 export function formatMetricUsingUnit(value: number | null, unit: string) {
-  if (!defined(value)) {
+  if (!defined(value) || Math.abs(value) === Infinity) {
     return '\u2014';
   }
 
@@ -258,10 +262,11 @@ export function formatMetricUsingUnit(value: number | null, unit: string) {
       return formatBytesBase10(value, 6);
     case 'none':
     default:
-      return value.toLocaleString();
+      return formatAbbreviatedNumberWithDynamicPrecision(value);
   }
 }
 
+// @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
 const getShortMetricUnit = (unit: string): string => METRIC_UNIT_TO_SHORT[unit] ?? '';
 
 export function formatMetricUsingFixedUnit(
@@ -278,16 +283,4 @@ export function formatMetricUsingFixedUnit(
   return op === 'count'
     ? formattedNumber
     : `${formattedNumber}${getShortMetricUnit(unit)}`.trim();
-}
-
-export function formatMetricsUsingUnitAndOp(
-  value: number | null,
-  unit: string,
-  operation?: string
-) {
-  if (operation === 'count') {
-    // if the operation is count, we want to ignore the unit and always format the value as a number
-    return value?.toLocaleString() ?? '';
-  }
-  return formatMetricUsingUnit(value, unit);
 }

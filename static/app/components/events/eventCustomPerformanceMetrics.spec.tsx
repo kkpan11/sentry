@@ -1,4 +1,3 @@
-import {browserHistory} from 'react-router';
 import {EventFixture} from 'sentry-fixture/event';
 
 import {initializeOrg} from 'sentry-test/initializeOrg';
@@ -8,9 +7,6 @@ import EventCustomPerformanceMetrics from 'sentry/components/events/eventCustomP
 import type {Event} from 'sentry/types/event';
 
 describe('EventCustomPerformanceMetrics', function () {
-  beforeEach(function () {
-    browserHistory.push = jest.fn();
-  });
   it('should not render anything', function () {
     const {router, organization} = initializeOrg();
     render(

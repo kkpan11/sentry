@@ -1,8 +1,10 @@
 import logging
 import re
+from collections.abc import Mapping
+from typing import Any, overload
 
 from sentry.attachments import attachment_cache
-from sentry.stacktraces.processing import find_stacktraces_in_data
+from sentry.stacktraces.processing import StacktraceInfo
 from sentry.utils.cache import cache_key_for_event
 from sentry.utils.safe import get_path
 
@@ -52,11 +54,14 @@ def native_images_from_data(data):
     return get_path(data, "debug_meta", "images", default=(), filter=is_native_image)
 
 
-def is_native_event(data):
+def is_native_event(data: Mapping[str, Any], stacktraces: list[StacktraceInfo]) -> bool:
+    """Returns whether `data` is a native event, based on its platform and
+    the supplied stacktraces."""
+
     if is_native_platform(data.get("platform")):
         return True
 
-    for stacktrace in find_stacktraces_in_data(data):
+    for stacktrace in stacktraces:
         if any(is_native_platform(x) for x in stacktrace.platforms):
             return True
 
@@ -103,7 +108,15 @@ def get_event_attachment(data, attachment_type):
     return next((a for a in attachments if a.type == attachment_type), None)
 
 
-def convert_crashreport_count(value, allow_none=False) -> int | None:
+@overload
+def convert_crashreport_count(value: bool | None) -> int: ...
+
+
+@overload
+def convert_crashreport_count(value: bool | None, *, allow_none: bool) -> int | None: ...
+
+
+def convert_crashreport_count(value: bool | None, allow_none: bool = False) -> int | None:
     """
     Shim to read both legacy and new `sentry:store_crash_reports` project and
     organization options.

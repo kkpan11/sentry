@@ -9,10 +9,12 @@ import ButtonBar from 'sentry/components/buttonBar';
 import {SectionHeading} from 'sentry/components/charts/styles';
 import Input from 'sentry/components/input';
 import {getOffsetOfElement} from 'sentry/components/performance/waterfall/utils';
-import {IconAdd, IconDelete, IconGrabbable} from 'sentry/icons';
+import {Tooltip} from 'sentry/components/tooltip';
+import {IconAdd, IconDelete, IconGrabbable, IconWarning} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {MRI, Organization} from 'sentry/types';
+import type {MRI} from 'sentry/types/metrics';
+import type {Organization} from 'sentry/types/organization';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import type {Column} from 'sentry/utils/discover/fields';
 import {
@@ -49,9 +51,11 @@ type Props = {
   className?: string;
   filterAggregateParameters?: (option: FieldValueOption) => boolean;
   filterPrimaryOptions?: (option: FieldValueOption) => boolean;
+  isOnDemandWidget?: boolean;
   noFieldsMessage?: string;
   showAliasField?: boolean;
   source?: Sources;
+  supportsEquations?: boolean;
 };
 
 type State = {
@@ -69,8 +73,8 @@ const GHOST_PADDING = 4;
 const MAX_COL_COUNT = 20;
 
 enum PlaceholderPosition {
-  TOP,
-  BOTTOM,
+  TOP = 0,
+  BOTTOM = 1,
 }
 
 class ColumnEditCollection extends Component<Props, State> {
@@ -110,7 +114,7 @@ class ColumnEditCollection extends Component<Props, State> {
   checkColumnErrors(columns: Column[]) {
     const error = new Map();
     for (let i = 0; i < columns.length; i += 1) {
-      const column = columns[i];
+      const column = columns[i]!;
       if (column.kind === 'equation') {
         const result = parseArithmetic(column.field);
         if (result.error) {
@@ -176,15 +180,15 @@ class ColumnEditCollection extends Component<Props, State> {
   };
 
   updateEquationFields = (newColumns: Column[], index: number, updatedColumn: Column) => {
-    const oldColumn = newColumns[index];
-    const existingColumn = generateFieldAsString(newColumns[index]);
+    const oldColumn = newColumns[index]!;
+    const existingColumn = generateFieldAsString(newColumns[index]!);
     const updatedColumnString = generateFieldAsString(updatedColumn);
     if (!isLegalEquationColumn(updatedColumn) || hasDuplicate(newColumns, oldColumn)) {
       return;
     }
     // Find the equations in the list of columns
     for (let i = 0; i < newColumns.length; i++) {
-      const newColumn = newColumns[i];
+      const newColumn = newColumns[i]!;
 
       if (newColumn.kind === 'equation') {
         const result = parseArithmetic(newColumn.field);
@@ -214,7 +218,7 @@ class ColumnEditCollection extends Component<Props, State> {
         newColumns[i] = {
           kind: 'equation',
           field: newEquation,
-          alias: newColumns[i].alias,
+          alias: newColumns[i]!.alias,
         };
       }
     }
@@ -324,7 +328,7 @@ class ColumnEditCollection extends Component<Props, State> {
 
   isFixedIssueColumn = (columnIndex: number) => {
     const {source, columns} = this.props;
-    const column = columns[columnIndex];
+    const column = columns[columnIndex]!;
     const issueFieldColumnCount = columns.filter(
       col => col.kind === 'field' && col.field === FieldKey.ISSUE
     ).length;
@@ -343,7 +347,7 @@ class ColumnEditCollection extends Component<Props, State> {
 
   isRemainingReleaseHealthAggregate = (columnIndex: number) => {
     const {source, columns} = this.props;
-    const column = columns[columnIndex];
+    const column = columns[columnIndex]!;
     const aggregateCount = columns.filter(
       col => col.kind === FieldValueKind.FUNCTION
     ).length;
@@ -377,7 +381,7 @@ class ColumnEditCollection extends Component<Props, State> {
     // Reorder columns and trigger change.
     const newColumns = [...this.props.columns];
     const removed = newColumns.splice(sourceIndex, 1);
-    newColumns.splice(targetIndex, 0, removed[0]);
+    newColumns.splice(targetIndex, 0, removed[0]!);
     this.checkColumnErrors(newColumns);
     this.props.onChange(newColumns);
 
@@ -403,7 +407,7 @@ class ColumnEditCollection extends Component<Props, State> {
 
     const top = Number(this.state.top) - dragOffsetY;
     const left = Number(this.state.left) - dragOffsetX;
-    const col = this.props.columns[index];
+    const col = this.props.columns[index]!;
 
     const style = {
       top: `${top}px`,
@@ -449,6 +453,7 @@ class ColumnEditCollection extends Component<Props, State> {
       noFieldsMessage,
       showAliasField,
       source,
+      isOnDemandWidget,
     } = this.props;
     const {isDragging, draggingTargetIndex, draggingIndex} = this.state;
 
@@ -497,8 +502,8 @@ class ColumnEditCollection extends Component<Props, State> {
           {source === WidgetType.METRICS && !this.isFixedMetricsColumn(i) ? (
             <MetricTagQueryField
               mri={
-                columns[0].kind === FieldValueKind.FUNCTION
-                  ? columns[0].function[1]
+                columns[0]!.kind === FieldValueKind.FUNCTION
+                  ? columns[0]!.function[1]
                   : // We should never get here because the first column should always be function for metrics
                     undefined
               }
@@ -567,6 +572,10 @@ class ColumnEditCollection extends Component<Props, State> {
           ) : singleColumn && showAliasField ? null : (
             <span />
           )}
+
+          {isOnDemandWidget && col.kind === 'equation' ? (
+            <OnDemandEquationsWarning />
+          ) : null}
         </RowContainer>
         {position === PlaceholderPosition.BOTTOM && placeholder}
       </Fragment>
@@ -574,7 +583,7 @@ class ColumnEditCollection extends Component<Props, State> {
   }
 
   render() {
-    const {className, columns, showAliasField, source} = this.props;
+    const {className, columns, showAliasField, source, supportsEquations} = this.props;
     const canDelete = columns.filter(field => field.kind !== 'equation').length > 1;
     const canDrag = columns.length > 1;
     const canAdd = columns.length < MAX_COL_COUNT;
@@ -598,6 +607,7 @@ class ColumnEditCollection extends Component<Props, State> {
                 return 2;
               }
               const operation =
+                // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
                 AGGREGATIONS[col.function[0]] ?? SESSIONS_OPERATIONS[col.function[0]];
               if (!operation || !operation.parameters) {
                 // Operation should be in the look-up table, but not all operations are (eg. private). This should be changed at some point.
@@ -664,20 +674,18 @@ class ColumnEditCollection extends Component<Props, State> {
             >
               {t('Add a Column')}
             </Button>
-            {WidgetType.ISSUE &&
-              source !== WidgetType.RELEASE &&
-              source !== WidgetType.METRICS && (
-                <Button
-                  size="sm"
-                  aria-label={t('Add an Equation')}
-                  onClick={this.handleAddEquation}
-                  title={title}
-                  disabled={!canAdd}
-                  icon={<IconAdd isCircled />}
-                >
-                  {t('Add an Equation')}
-                </Button>
-              )}
+            {supportsEquations && (
+              <Button
+                size="sm"
+                aria-label={t('Add an Equation')}
+                onClick={this.handleAddEquation}
+                title={title}
+                disabled={!canAdd}
+                icon={<IconAdd isCircled />}
+              >
+                {t('Add an Equation')}
+              </Button>
+            )}
           </Actions>
         </RowContainer>
       </div>
@@ -690,13 +698,14 @@ interface MetricTagQueryFieldProps
   mri?: string;
 }
 
-const EMPTY_ARRAY = [];
+const EMPTY_ARRAY: any = [];
 function MetricTagQueryField({mri, ...props}: MetricTagQueryFieldProps) {
   const {projects} = usePageFilters().selection;
   const {data = EMPTY_ARRAY} = useMetricsTags(mri as MRI | undefined, {projects});
 
   const fieldOptions = useMemo(() => {
     return data.reduce(
+      // @ts-ignore TS(7006): Parameter 'acc' implicitly has an 'any' type.
       (acc, tag) => {
         acc[`tag:${tag.key}`] = {
           label: tag.key,
@@ -717,6 +726,21 @@ function MetricTagQueryField({mri, ...props}: MetricTagQueryFieldProps) {
   return <QueryField fieldOptions={fieldOptions} {...props} />;
 }
 
+function OnDemandEquationsWarning() {
+  return (
+    <OnDemandContainer>
+      <Tooltip
+        containerDisplayMode="inline-flex"
+        title={t(
+          `This is using indexed data because we don't routinely collect metrics for equations.`
+        )}
+      >
+        <IconWarning color="warningText" />
+      </Tooltip>
+    </OnDemandContainer>
+  );
+}
+
 const Actions = styled(ButtonBar)<{showAliasField?: boolean}>`
   grid-column: ${p => (p.showAliasField ? '1/-1' : ' 2/3')};
   justify-content: flex-start;
@@ -727,7 +751,7 @@ const RowContainer = styled('div')<{
   showAliasField?: boolean;
 }>`
   display: grid;
-  grid-template-columns: ${space(3)} 1fr 40px;
+  grid-template-columns: ${space(3)} 1fr 40px 40px;
   justify-content: center;
   align-items: center;
   width: 100%;
@@ -738,12 +762,12 @@ const RowContainer = styled('div')<{
     p.showAliasField &&
     css`
       align-items: flex-start;
-      grid-template-columns: ${p.singleColumn ? `1fr` : `${space(3)} 1fr 40px`};
+      grid-template-columns: ${p.singleColumn ? `1fr` : `${space(3)} 1fr 40px 40px`};
 
       @media (min-width: ${p.theme.breakpoints.small}) {
         grid-template-columns: ${p.singleColumn
           ? `1fr calc(200px + ${space(1)})`
-          : `${space(3)} 1fr calc(200px + ${space(1)}) 40px`};
+          : `${space(3)} 1fr calc(200px + ${space(1)}) 40px 40px`};
       }
     `};
 `;
@@ -767,6 +791,13 @@ const Ghost = styled('div')`
   & svg {
     cursor: grabbing;
   }
+`;
+
+const OnDemandContainer = styled('div')`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 `;
 
 const DragPlaceholder = styled('div')`

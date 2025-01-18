@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import orjson
 import sentry_sdk
 
 from sentry.attachments import CachedAttachment, attachment_cache
@@ -10,9 +11,17 @@ from sentry.ingest.consumer.processors import CACHE_TIMEOUT
 from sentry.lang.java.proguard import open_proguard_mapper
 from sentry.models.debugfile import ProjectDebugFile
 from sentry.models.project import Project
-from sentry.utils import json
+from sentry.stacktraces.processing import StacktraceInfo
 from sentry.utils.cache import cache_key_for_event
 from sentry.utils.safe import get_path
+
+# Platform values that should mark an event
+# or frame as being Java for the purposes
+# of symbolication.
+#
+# Strictly speaking, this should probably include
+# "android" too—at least we use it in profiling.
+JAVA_PLATFORMS = ("java",)
 
 
 def is_valid_proguard_image(image):
@@ -69,31 +78,6 @@ def get_proguard_mapper(uuid: str, project: Project):
     return mapper
 
 
-def _deobfuscate_view_hierarchy(event_data: dict[str, Any], project: Project, view_hierarchy):
-    """
-    Deobfuscates a view hierarchy in-place.
-
-    If we're unable to fetch a ProGuard uuid or unable to init the mapper,
-    then the view hierarchy remains unmodified.
-    """
-    proguard_uuids = get_proguard_images(event_data)
-    if len(proguard_uuids) == 0:
-        return
-
-    with sentry_sdk.start_span(op="proguard.deobfuscate_view_hierarchy_data"):
-        for proguard_uuid in proguard_uuids:
-            mapper = get_proguard_mapper(proguard_uuid, project)
-            if mapper is None:
-                return
-
-            windows_to_deobfuscate = [*view_hierarchy.get("windows")]
-            while windows_to_deobfuscate:
-                window = windows_to_deobfuscate.pop()
-                window["type"] = mapper.remap_class(window.get("type")) or window.get("type")
-                if children := window.get("children"):
-                    windows_to_deobfuscate.extend(children)
-
-
 @sentry_sdk.trace
 def deobfuscation_template(data, map_type, deobfuscation_fn):
     """
@@ -112,7 +96,7 @@ def deobfuscation_template(data, map_type, deobfuscation_fn):
     new_attachments = []
     for attachment in attachments:
         if attachment.type == "event.view_hierarchy":
-            view_hierarchy = json.loads(attachment_cache.get_data(attachment))
+            view_hierarchy = orjson.loads(attachment_cache.get_data(attachment))
             deobfuscation_fn(data, project, view_hierarchy)
 
             # Reupload to cache as a unchunked data
@@ -122,7 +106,7 @@ def deobfuscation_template(data, map_type, deobfuscation_fn):
                     id=attachment.id,
                     name=attachment.name,
                     content_type=attachment.content_type,
-                    data=json.dumps_htmlsafe(view_hierarchy).encode(),
+                    data=orjson.dumps(view_hierarchy),
                     chunks=None,
                 )
             )
@@ -132,5 +116,33 @@ def deobfuscation_template(data, map_type, deobfuscation_fn):
     attachment_cache.set(cache_key, attachments=new_attachments, timeout=CACHE_TIMEOUT)
 
 
-def deobfuscate_view_hierarchy(data):
-    deobfuscation_template(data, "proguard", _deobfuscate_view_hierarchy)
+def is_jvm_event(data: Any, stacktraces: list[StacktraceInfo]) -> bool:
+    """Returns whether `data` is a JVM event, based on its platform,
+    the supplied stacktraces, and its images."""
+
+    platform = data.get("platform")
+
+    if platform in JAVA_PLATFORMS:
+        return True
+
+    for stacktrace in stacktraces:
+        # The platforms of a stacktrace are exactly the platforms of its frames
+        # so this is tantamount to checking if any frame has a Java platform.
+        if any(x in JAVA_PLATFORMS for x in stacktrace.platforms):
+            return True
+
+    # check if there are any JVM or Proguard images
+    # we *do* hit this code path, likely for events that don't have platform
+    # `"java"` but contain Java view hierarchies.
+    images = get_path(
+        data,
+        "debug_meta",
+        "images",
+        filter=lambda x: is_valid_jvm_image(x) or is_valid_proguard_image(x),
+        default=(),
+    )
+
+    if images:
+        return True
+
+    return False

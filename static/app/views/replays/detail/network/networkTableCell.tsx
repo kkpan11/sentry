@@ -159,7 +159,7 @@ const NetworkTableCell = forwardRef<HTMLDivElement, Props>(
         <Cell {...columnProps} numeric>
           <ButtonWrapper>
             <TimestampButton
-              format="mm:ss.SSS"
+              precision="ms"
               onClick={event => {
                 event.stopPropagation();
                 onClickTimestamp(frame);
@@ -172,7 +172,7 @@ const NetworkTableCell = forwardRef<HTMLDivElement, Props>(
       ),
     ];
 
-    return renderFns[columnIndex]();
+    return renderFns[columnIndex]!();
   }
 );
 

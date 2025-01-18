@@ -1,12 +1,13 @@
 import {Fragment, useCallback, useMemo} from 'react';
 import styled from '@emotion/styled';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 import {disconnectIdentity} from 'sentry/actionCreators/account';
 import {Alert} from 'sentry/components/alert';
+import Tag from 'sentry/components/badge/tag';
 import {Button} from 'sentry/components/button';
 import Confirm from 'sentry/components/confirm';
-import DateTime from 'sentry/components/dateTime';
+import {DateTime} from 'sentry/components/dateTime';
 import EmptyMessage from 'sentry/components/emptyMessage';
 import LoadingError from 'sentry/components/loadingError';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
@@ -15,17 +16,16 @@ import PanelBody from 'sentry/components/panels/panelBody';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import PanelItem from 'sentry/components/panels/panelItem';
 import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
-import Tag from 'sentry/components/tag';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {UserIdentityConfig} from 'sentry/types';
-import {UserIdentityCategory, UserIdentityStatus} from 'sentry/types';
+import type {UserIdentityConfig} from 'sentry/types/auth';
+import {UserIdentityCategory, UserIdentityStatus} from 'sentry/types/auth';
 import {setApiQueryData, useApiQuery, useQueryClient} from 'sentry/utils/queryClient';
 import IdentityIcon from 'sentry/views/settings/components/identityIcon';
 import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
 import TextBlock from 'sentry/views/settings/components/text/textBlock';
 
-const EMPTY_ARRAY = [];
+const EMPTY_ARRAY: any = [];
 const IDENTITIES_ENDPOINT = '/users/me/user-identities/';
 
 function itemOrder(a: UserIdentityConfig, b: UserIdentityConfig) {
@@ -126,7 +126,7 @@ function AccountIdentities() {
   const queryClient = useQueryClient();
   const {
     data: identities = EMPTY_ARRAY,
-    isLoading,
+    isPending,
     isError,
     refetch,
   } = useApiQuery<UserIdentityConfig[]>([IDENTITIES_ENDPOINT], {
@@ -136,6 +136,7 @@ function AccountIdentities() {
   const appIdentities = useMemo(
     () =>
       identities
+        // @ts-ignore TS(7006): Parameter 'identity' implicitly has an 'any' type.
         .filter(identity => identity.category !== UserIdentityCategory.ORG_IDENTITY)
         .sort(itemOrder),
     [identities]
@@ -144,6 +145,7 @@ function AccountIdentities() {
   const orgIdentities = useMemo(
     () =>
       identities
+        // @ts-ignore TS(7006): Parameter 'identity' implicitly has an 'any' type.
         .filter(identity => identity.category === UserIdentityCategory.ORG_IDENTITY)
         .sort(itemOrder),
     [identities]
@@ -164,7 +166,7 @@ function AccountIdentities() {
     [queryClient]
   );
 
-  if (isLoading) {
+  if (isPending) {
     return <LoadingIndicator />;
   }
 
@@ -187,6 +189,7 @@ function AccountIdentities() {
               )}
             </EmptyMessage>
           ) : (
+            // @ts-ignore TS(7006): Parameter 'identity' implicitly has an 'any' type.
             appIdentities.map(identity => (
               <IdentityItem
                 key={identity.id}
@@ -208,6 +211,7 @@ function AccountIdentities() {
               )}
             </EmptyMessage>
           ) : (
+            // @ts-ignore TS(7006): Parameter 'identity' implicitly has an 'any' type.
             orgIdentities.map(identity => (
               <IdentityItem
                 key={identity.id}
@@ -241,7 +245,7 @@ const IdentityText = styled('div')<{isSingleLine?: boolean}>`
   margin-left: ${space(1.5)};
 `;
 const IdentityName = styled('div')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 const IdentityDateTime = styled(DateTime)`
   font-size: ${p => p.theme.fontSizeRelativeSmall};
@@ -254,6 +258,7 @@ const TagWrapper = styled('div')`
   justify-content: flex-start;
   flex-grow: 1;
   margin-right: ${space(1)};
+  gap: ${space(0.75)};
 `;
 
 export default AccountIdentities;

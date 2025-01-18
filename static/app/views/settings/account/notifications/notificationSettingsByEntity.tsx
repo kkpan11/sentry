@@ -14,7 +14,8 @@ import {IconAdd, IconDelete} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {useApiQuery} from 'sentry/utils/queryClient';
 import useRouter from 'sentry/utils/useRouter';
 
@@ -56,13 +57,16 @@ function NotificationSettingsByEntity({
 
   const orgId =
     router.location?.query?.organizationId ?? orgFromSubdomain ?? organizations[0]?.id;
-  const orgSlug =
-    organizations.find(({id}) => id === orgId)?.slug || organizations[0]?.slug;
+  let organization = organizations.find(({id}) => id === orgId);
+  if (!organization) {
+    organization = organizations[0]!;
+  }
+  const orgSlug = organization.slug;
 
   // loads all the projects for an org
   const {
     data: projects,
-    isLoading,
+    isPending,
     isSuccess,
     isError,
     refetch,
@@ -70,9 +74,10 @@ function NotificationSettingsByEntity({
     [
       `/organizations/${orgSlug}/projects/`,
       {
+        host: organization.links.regionUrl,
         query: {
           all_projects: '1',
-          collapse: 'latestDeploys',
+          collapse: ['latestDeploys', 'unusedFeatures'],
         },
       },
     ],
@@ -107,7 +112,7 @@ function NotificationSettingsByEntity({
     handleAddNotificationOption(data);
   };
 
-  const valueOptions = NOTIFICATION_SETTING_FIELDS[notificationType].choices;
+  const valueOptions = NOTIFICATION_SETTING_FIELDS[notificationType]!.choices;
 
   const renderOverrides = () => {
     const matchedOptions = notificationOptions.filter(
@@ -162,7 +167,7 @@ function NotificationSettingsByEntity({
   };
 
   const entityOptions = entities
-    .filter(({id}) => {
+    .filter(({id}: any) => {
       const match = notificationOptions.find(
         option =>
           option.scopeType === entityType &&
@@ -171,7 +176,7 @@ function NotificationSettingsByEntity({
       );
       return !match;
     })
-    .map(obj => {
+    .map((obj: any) => {
       const entity = entityById[obj.id];
       const idBadgeProps =
         entityType === 'project'
@@ -192,7 +197,7 @@ function NotificationSettingsByEntity({
         ),
       };
     })
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a: any, b: any) => a.label.localeCompare(b.label));
 
   // Group options when displaying projects
   const groupedEntityOptions =
@@ -201,13 +206,13 @@ function NotificationSettingsByEntity({
           {
             label: t('My Projects'),
             options: entityOptions.filter(
-              project => (entityById[project.value] as Project).isMember
+              (project: any) => (entityById[project.value] as Project).isMember
             ),
           },
           {
             label: t('All Projects'),
             options: entityOptions.filter(
-              project => !(entityById[project.value] as Project).isMember
+              (project: any) => !(entityById[project.value] as Project).isMember
             ),
           },
         ]
@@ -259,7 +264,7 @@ function NotificationSettingsByEntity({
             aria-label={t('Add override')}
           />
         </ControlItem>
-        {isLoading && (
+        {isPending && (
           <PanelBody>
             <LoadingIndicator />
           </PanelBody>

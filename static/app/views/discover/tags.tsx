@@ -9,6 +9,7 @@ import type {Client} from 'sentry/api';
 import {Button} from 'sentry/components/button';
 import ErrorPanel from 'sentry/components/charts/errorPanel';
 import {SectionHeading} from 'sentry/components/charts/styles';
+import {deviceNameMapper} from 'sentry/components/deviceName';
 import EmptyStateWarning from 'sentry/components/emptyStateWarning';
 import {TagFacetsList} from 'sentry/components/group/tagFacets';
 import TagFacetsDistributionMeter from 'sentry/components/group/tagFacets/tagFacetsDistributionMeter';
@@ -16,11 +17,12 @@ import Placeholder from 'sentry/components/placeholder';
 import {IconWarning} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
-import {trackAnalytics} from 'sentry/utils/analytics';
+import type {Organization} from 'sentry/types/organization';
 import type EventView from 'sentry/utils/discover/eventView';
 import {isAPIPayloadSimilar} from 'sentry/utils/discover/eventView';
 import parseLinkHeader from 'sentry/utils/parseLinkHeader';
+import type {UseApiQueryResult} from 'sentry/utils/queryClient';
+import type RequestError from 'sentry/utils/requestError/requestError';
 import withApi from 'sentry/utils/withApi';
 
 type Props = {
@@ -32,6 +34,7 @@ type Props = {
   totalValues: null | number;
   confirmedQuery?: boolean;
   onTagValueClick?: (title: string, value: TagSegment) => void;
+  tagsQueryResults?: UseApiQueryResult<Tag[], RequestError>;
 };
 
 type State = {
@@ -87,6 +90,29 @@ class Tags extends Component<Props, State> {
       this.setState({hasLoaded: false, tags: []});
     }
 
+    // If we have tagsQueryResults, we can use that instead of fetching new data on mount.
+    if (!appendTags && this.props.tagsQueryResults) {
+      const pageLinks =
+        this.props.tagsQueryResults?.getResponseHeader?.('Link') ?? undefined;
+      let hasMore = false;
+      let cursor: string | undefined;
+      if (pageLinks) {
+        const paginationObject = parseLinkHeader(pageLinks);
+        hasMore = paginationObject?.next?.results ?? false;
+        cursor = paginationObject.next?.cursor;
+      }
+
+      this.setState({
+        tags: this.props.tagsQueryResults.data || [],
+        loading: this.props.tagsQueryResults.isPending,
+        hasLoaded: !this.props.tagsQueryResults.isPending,
+        hasMore,
+        nextCursor: cursor,
+        error: this.props.tagsQueryResults.error?.message || '',
+      });
+      return;
+    }
+
     // Fetch should be forced after mounting as confirmedQuery isn't guaranteed
     // since this component can mount/unmount via show/hide tags separate from
     // data being loaded for the rest of the page.
@@ -110,9 +136,6 @@ class Tags extends Component<Props, State> {
       }
 
       let tags = data;
-      if (!organization.features.includes('device-classification')) {
-        tags = tags.filter(tag => tag.key !== 'device.class');
-      }
       if (appendTags) {
         tags = [...this.state.tags, ...tags];
       }
@@ -129,25 +152,21 @@ class Tags extends Component<Props, State> {
     }
   };
 
-  handleTagClick = (tag: string) => {
-    const {organization} = this.props;
-    // metrics
-    trackAnalytics('discover_v2.facet_map.clicked', {organization, tag});
-  };
-
   renderTag(tag: Tag, index: number) {
     const {generateUrl, onTagValueClick, totalValues} = this.props;
 
     const segments: TagSegment[] = tag.topValues.map(segment => {
-      segment.url = generateUrl(tag.key, segment.value);
-
-      return segment;
+      return {
+        ...segment,
+        name: formatTag(tag.key, segment.value),
+        url: generateUrl(tag.key, segment.value),
+      };
     });
     // Ensure we don't show >100% if there's a slight mismatch between the facets
     // endpoint and the totals endpoint
     const maxTotalValues =
       segments.length > 0
-        ? Math.max(Number(totalValues), segments[0].count)
+        ? Math.max(Number(totalValues), segments[0]!.count)
         : totalValues;
     return (
       <li key={tag.key} aria-label={tag.key}>
@@ -228,6 +247,13 @@ class Tags extends Component<Props, State> {
       </Fragment>
     );
   }
+}
+
+function formatTag(key: string, value: string): string {
+  if (key === 'device') {
+    return deviceNameMapper(value) || value;
+  }
+  return value;
 }
 
 const StyledEmptyStateWarning = styled(EmptyStateWarning)`

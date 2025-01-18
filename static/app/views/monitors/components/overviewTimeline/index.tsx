@@ -6,74 +6,48 @@ import {
   setEnvironmentIsMuted,
   updateMonitor,
 } from 'sentry/actionCreators/monitors';
+import {DateNavigator} from 'sentry/components/checkInTimeline/dateNavigator';
+import {
+  GridLineLabels,
+  GridLineOverlay,
+} from 'sentry/components/checkInTimeline/gridLines';
+import {useDateNavigation} from 'sentry/components/checkInTimeline/hooks/useDateNavigation';
+import {useTimeWindowConfig} from 'sentry/components/checkInTimeline/hooks/useTimeWindowConfig';
 import Panel from 'sentry/components/panels/panel';
 import {Sticky} from 'sentry/components/sticky';
 import {space} from 'sentry/styles/space';
-import {setApiQueryData, useApiQuery, useQueryClient} from 'sentry/utils/queryClient';
+import {setApiQueryData, useQueryClient} from 'sentry/utils/queryClient';
 import useApi from 'sentry/utils/useApi';
 import {useDimensions} from 'sentry/utils/useDimensions';
+import {useLocation} from 'sentry/utils/useLocation';
 import useOrganization from 'sentry/utils/useOrganization';
-import useRouter from 'sentry/utils/useRouter';
-import {
-  GridLineOverlay,
-  GridLineTimeLabels,
-} from 'sentry/views/monitors/components/overviewTimeline/gridLines';
-import {SortSelector} from 'sentry/views/monitors/components/overviewTimeline/sortSelector';
+import type {Monitor} from 'sentry/views/monitors/types';
 import {makeMonitorListQueryKey} from 'sentry/views/monitors/utils';
 
-import type {Monitor} from '../../types';
+import {CronServiceIncidents} from '../serviceIncidents';
 
-import {ResolutionSelector} from './resolutionSelector';
-import {TimelineTableRow} from './timelineTableRow';
-import type {MonitorBucketData, TimeWindow} from './types';
-import {getConfigFromTimeRange, getStartFromTimeWindow} from './utils';
+import {OverviewRow} from './overviewRow';
+import {SortSelector} from './sortSelector';
 
 interface Props {
   monitorList: Monitor[];
+  linkToAlerts?: boolean;
 }
 
-export function OverviewTimeline({monitorList}: Props) {
+export function OverviewTimeline({monitorList, linkToAlerts}: Props) {
   const organization = useOrganization();
   const api = useApi();
   const queryClient = useQueryClient();
-  const router = useRouter();
-  const location = router.location;
+  const location = useLocation();
 
-  const timeWindow: TimeWindow = location.query?.timeWindow ?? '24h';
-  const nowRef = useRef(new Date());
-  const start = getStartFromTimeWindow(nowRef.current, timeWindow);
   const elementRef = useRef<HTMLDivElement>(null);
   const {width: timelineWidth} = useDimensions<HTMLDivElement>({elementRef});
 
-  const timeWindowConfig = getConfigFromTimeRange(start, nowRef.current, timelineWidth);
-  const rollup = Math.floor((timeWindowConfig.elapsedMinutes * 60) / timelineWidth);
-  const monitorStatsQueryKey = `/organizations/${organization.slug}/monitors-stats/`;
-  const {data: monitorStats, isLoading} = useApiQuery<Record<string, MonitorBucketData>>(
-    [
-      monitorStatsQueryKey,
-      {
-        query: {
-          until: Math.floor(nowRef.current.getTime() / 1000),
-          since: Math.floor(start.getTime() / 1000),
-          monitor: monitorList.map(m => m.slug),
-          resolution: `${rollup}s`,
-          ...location.query,
-        },
-      },
-    ],
-    {
-      staleTime: 0,
-      enabled: timelineWidth > 0,
-    }
-  );
+  const timeWindowConfig = useTimeWindowConfig({timelineWidth});
+  const dateNavigation = useDateNavigation();
 
   const handleDeleteEnvironment = async (monitor: Monitor, env: string) => {
-    const success = await deleteMonitorEnvironment(
-      api,
-      organization.slug,
-      monitor.slug,
-      env
-    );
+    const success = await deleteMonitorEnvironment(api, organization.slug, monitor, env);
     if (!success) {
       return;
     }
@@ -85,18 +59,21 @@ export function OverviewTimeline({monitorList}: Props) {
         return oldMonitorList;
       }
 
-      const oldMonitor = oldMonitorList[oldMonitorIdx];
+      const oldMonitor = oldMonitorList[oldMonitorIdx]!;
       const newEnvList = oldMonitor.environments.filter(e => e.name !== env);
-      const newMonitor = {
+      const updatedMonitor = {
         ...oldMonitor,
         environments: newEnvList,
       };
 
-      return [
-        ...oldMonitorList.slice(0, oldMonitorIdx),
-        newMonitor,
-        ...oldMonitorList.slice(oldMonitorIdx + 1),
-      ];
+      const left = oldMonitorList.slice(0, oldMonitorIdx);
+      const right = oldMonitorList.slice(oldMonitorIdx + 1);
+
+      if (newEnvList.length === 0) {
+        return [...left, ...right];
+      }
+
+      return [...left, updatedMonitor, ...right];
     });
   };
 
@@ -108,7 +85,7 @@ export function OverviewTimeline({monitorList}: Props) {
     const resp = await setEnvironmentIsMuted(
       api,
       organization.slug,
-      monitor.slug,
+      monitor,
       env,
       isMuted
     );
@@ -128,7 +105,7 @@ export function OverviewTimeline({monitorList}: Props) {
 
   const handleToggleStatus = async (monitor: Monitor) => {
     const status = monitor.status === 'active' ? 'disabled' : 'active';
-    const resp = await updateMonitor(api, organization.slug, monitor.slug, {status});
+    const resp = await updateMonitor(api, organization.slug, monitor, {status});
 
     if (resp === null) {
       return;
@@ -137,96 +114,78 @@ export function OverviewTimeline({monitorList}: Props) {
     const queryKey = makeMonitorListQueryKey(organization, location.query);
     setApiQueryData(queryClient, queryKey, (oldMonitorList: Monitor[]) => {
       const monitorIdx = oldMonitorList.findIndex(m => m.slug === monitor.slug);
-      oldMonitorList[monitorIdx] = {...oldMonitorList[monitorIdx], status: resp.status};
+      oldMonitorList[monitorIdx] = {...oldMonitorList[monitorIdx]!, status: resp.status};
 
       return oldMonitorList;
     });
   };
 
   return (
-    <MonitorListPanel>
+    <MonitorListPanel role="region">
       <TimelineWidthTracker ref={elementRef} />
-      <HeaderControls>
-        <ResolutionSelector />
-        <SortSelector />
-      </HeaderControls>
-      <StickyGridLineTimeLabels>
-        <BorderlessGridLineTimeLabels
-          timeWindowConfig={timeWindowConfig}
-          start={start}
-          end={nowRef.current}
-          width={timelineWidth}
-        />
-      </StickyGridLineTimeLabels>
-      <GridLineOverlay
+      <Header>
+        <HeaderControlsLeft>
+          <SortSelector size="xs" />
+          <DateNavigator
+            dateNavigation={dateNavigation}
+            direction="back"
+            size="xs"
+            borderless
+          />
+        </HeaderControlsLeft>
+        <AlignedGridLineLabels timeWindowConfig={timeWindowConfig} />
+        <HeaderControlsRight>
+          <DateNavigator
+            dateNavigation={dateNavigation}
+            direction="forward"
+            size="xs"
+            borderless
+          />
+        </HeaderControlsRight>
+      </Header>
+      <AlignedGridLineOverlay
         stickyCursor
-        showCursor={!isLoading}
+        allowZoom
+        showCursor
+        additionalUi={<CronServiceIncidents timeWindowConfig={timeWindowConfig} />}
         timeWindowConfig={timeWindowConfig}
-        start={start}
-        end={nowRef.current}
-        width={timelineWidth}
       />
 
-      {monitorList.map(monitor => (
-        <TimelineTableRow
-          key={monitor.id}
-          monitor={monitor}
-          timeWindowConfig={timeWindowConfig}
-          start={start}
-          bucketedData={monitorStats?.[monitor.slug]}
-          end={nowRef.current}
-          width={timelineWidth}
-          onDeleteEnvironment={env => handleDeleteEnvironment(monitor, env)}
-          onToggleMuteEnvironment={(env, isMuted) =>
-            handleToggleMuteEnvironment(monitor, env, isMuted)
-          }
-          onToggleStatus={handleToggleStatus}
-        />
-      ))}
+      <MonitorRows>
+        {monitorList.map(monitor => (
+          <OverviewRow
+            key={monitor.id}
+            monitor={monitor}
+            timeWindowConfig={timeWindowConfig}
+            onDeleteEnvironment={env => handleDeleteEnvironment(monitor, env)}
+            onToggleMuteEnvironment={(env, isMuted) =>
+              handleToggleMuteEnvironment(monitor, env, isMuted)
+            }
+            onToggleStatus={handleToggleStatus}
+            linkToAlerts={linkToAlerts}
+          />
+        ))}
+      </MonitorRows>
     </MonitorListPanel>
   );
 }
 
-const MonitorListPanel = styled(Panel)`
+const Header = styled(Sticky)`
   display: grid;
-  grid-template-columns: 350px 135px 1fr;
-`;
+  grid-column: 1/-1;
+  grid-template-columns: subgrid;
 
-const HeaderControls = styled(Sticky)`
-  display: flex;
-  gap: ${space(0.5)};
   z-index: 1;
-  padding: ${space(1.5)} ${space(2)};
-  grid-column: 1/3;
   background: ${p => p.theme.background};
   border-top-left-radius: ${p => p.theme.panelBorderRadius};
-  box-shadow: 0 1px ${p => p.theme.translucentBorder};
-
-  &[data-stuck] {
-    border-radius: 0;
-    border-left: 1px solid ${p => p.theme.border};
-    margin-left: -1px;
-  }
-`;
-
-// We don't need border here because it is already accomplished via box-shadow below
-const BorderlessGridLineTimeLabels = styled(GridLineTimeLabels)`
-  border: none;
-`;
-
-const StickyGridLineTimeLabels = styled(Sticky)`
-  > * {
-    height: 100%;
-  }
-  z-index: 1;
-  background: ${p => p.theme.background};
   border-top-right-radius: ${p => p.theme.panelBorderRadius};
   box-shadow: 0 1px ${p => p.theme.translucentBorder};
 
   &[data-stuck] {
     border-radius: 0;
+    border-left: 1px solid ${p => p.theme.border};
     border-right: 1px solid ${p => p.theme.border};
-    margin-right: -1px;
+    margin: 0 -1px;
   }
 `;
 
@@ -234,5 +193,42 @@ const TimelineWidthTracker = styled('div')`
   position: absolute;
   width: 100%;
   grid-row: 1;
-  grid-column: 3;
+  grid-column: 3/-1;
+`;
+const AlignedGridLineOverlay = styled(GridLineOverlay)`
+  grid-row: 1;
+  grid-column: 3/-1;
+`;
+
+const AlignedGridLineLabels = styled(GridLineLabels)`
+  grid-row: 1;
+  grid-column: 3/-1;
+`;
+
+const MonitorListPanel = styled(Panel)`
+  display: grid;
+  grid-template-columns: 350px 135px 1fr max-content;
+`;
+
+const MonitorRows = styled('ul')`
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+`;
+
+const HeaderControlsLeft = styled('div')`
+  grid-column: 1/3;
+  display: flex;
+  justify-content: space-between;
+  gap: ${space(0.5)};
+  padding: ${space(1.5)} ${space(2)};
+`;
+
+const HeaderControlsRight = styled('div')`
+  grid-row: 1;
+  grid-column: -1;
+  padding: ${space(1.5)} ${space(2)};
 `;

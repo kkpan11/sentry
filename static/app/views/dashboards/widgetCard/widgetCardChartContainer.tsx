@@ -1,27 +1,30 @@
 import {Fragment} from 'react';
 import styled from '@emotion/styled';
-import type {DataZoomComponentOption, LegendComponentOption} from 'echarts';
+import type {LegendComponentOption} from 'echarts';
 import type {Location} from 'history';
 
 import type {Client} from 'sentry/api';
 import TransparentLoadingMask from 'sentry/components/charts/transparentLoadingMask';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
-import type {Organization, PageFilters} from 'sentry/types';
-import type {EChartEventHandler, Series} from 'sentry/types/echarts';
+import type {PageFilters} from 'sentry/types/core';
+import type {
+  EChartDataZoomHandler,
+  EChartEventHandler,
+  Series,
+} from 'sentry/types/echarts';
+import type {Organization} from 'sentry/types/organization';
 import type {TableDataWithTitle} from 'sentry/utils/discover/discoverQuery';
 import type {AggregationOutputType} from 'sentry/utils/discover/fields';
 import {useLocation} from 'sentry/utils/useLocation';
-import useRouter from 'sentry/utils/useRouter';
+import WidgetLegendNameEncoderDecoder from 'sentry/views/dashboards/widgetLegendNameEncoderDecoder';
 
 import type {DashboardFilters, Widget} from '../types';
 import {WidgetType} from '../types';
+import type WidgetLegendSelectionState from '../widgetLegendSelectionState';
 
-import type {AugmentedEChartDataZoomHandler} from './chart';
 import WidgetCardChart from './chart';
 import {IssueWidgetCard} from './issueWidgetCard';
-import IssueWidgetQueries from './issueWidgetQueries';
-import ReleaseWidgetQueries from './releaseWidgetQueries';
-import WidgetQueries from './widgetQueries';
+import {WidgetCardDataLoader} from './widgetCardDataLoader';
 
 type Props = {
   api: Client;
@@ -29,8 +32,8 @@ type Props = {
   organization: Organization;
   selection: PageFilters;
   widget: Widget;
+  widgetLegendState: WidgetLegendSelectionState;
   chartGroup?: string;
-  chartZoomOptions?: DataZoomComponentOption;
   dashboardFilters?: DashboardFilters;
   expandNumbers?: boolean;
   isMobile?: boolean;
@@ -48,15 +51,16 @@ type Props = {
     selected: Record<string, boolean>;
     type: 'legendselectchanged';
   }>;
-  onZoom?: AugmentedEChartDataZoomHandler;
+  onWidgetSplitDecision?: (splitDecision: WidgetType) => void;
+  onZoom?: EChartDataZoomHandler;
   renderErrorMessage?: (errorMessage?: string) => React.ReactNode;
-  showSlider?: boolean;
+  shouldResize?: boolean;
+  showConfidenceWarning?: boolean;
   tableItemLimit?: number;
   windowWidth?: number;
 };
 
 export function WidgetCardChartContainer({
-  api,
   organization,
   selection,
   widget,
@@ -70,98 +74,32 @@ export function WidgetCardChartContainer({
   legendOptions,
   expandNumbers,
   onDataFetched,
-  showSlider,
   noPadding,
-  chartZoomOptions,
+  onWidgetSplitDecision,
   chartGroup,
+  shouldResize,
+  widgetLegendState,
+  showConfidenceWarning,
 }: Props) {
   const location = useLocation();
-  const router = useRouter();
-  if (widget.widgetType === WidgetType.ISSUE) {
-    return (
-      <IssueWidgetQueries
-        api={api}
-        organization={organization}
-        widget={widget}
-        selection={selection}
-        limit={tableItemLimit}
-        onDataFetched={onDataFetched}
-        dashboardFilters={dashboardFilters}
-      >
-        {({tableResults, errorMessage, loading}) => {
-          return (
-            <Fragment>
-              {typeof renderErrorMessage === 'function'
-                ? renderErrorMessage(errorMessage)
-                : null}
-              <LoadingScreen loading={loading} />
-              <IssueWidgetCard
-                transformedResults={tableResults?.[0].data ?? []}
-                loading={loading}
-                errorMessage={errorMessage}
-                widget={widget}
-                location={location}
-                selection={selection}
-              />
-            </Fragment>
-          );
-        }}
-      </IssueWidgetQueries>
-    );
-  }
 
-  if (widget.widgetType === WidgetType.RELEASE) {
-    return (
-      <ReleaseWidgetQueries
-        api={api}
-        organization={organization}
-        widget={widget}
-        selection={selection}
-        limit={widget.limit ?? tableItemLimit}
-        onDataFetched={onDataFetched}
-        dashboardFilters={dashboardFilters}
-      >
-        {({tableResults, timeseriesResults, errorMessage, loading}) => {
-          return (
-            <Fragment>
-              {typeof renderErrorMessage === 'function'
-                ? renderErrorMessage(errorMessage)
-                : null}
-              <WidgetCardChart
-                timeseriesResults={timeseriesResults}
-                tableResults={tableResults}
-                errorMessage={errorMessage}
-                loading={loading}
-                location={location}
-                widget={widget}
-                selection={selection}
-                router={router}
-                organization={organization}
-                isMobile={isMobile}
-                windowWidth={windowWidth}
-                expandNumbers={expandNumbers}
-                onZoom={onZoom}
-                showSlider={showSlider}
-                noPadding={noPadding}
-                chartZoomOptions={chartZoomOptions}
-                chartGroup={chartGroup}
-              />
-            </Fragment>
-          );
-        }}
-      </ReleaseWidgetQueries>
-    );
+  function keepLegendState({
+    selected,
+  }: {
+    selected: Record<string, boolean>;
+    type: 'legendselectchanged';
+  }) {
+    widgetLegendState.setWidgetSelectionState(selected, widget);
   }
 
   return (
-    <WidgetQueries
-      api={api}
-      organization={organization}
+    <WidgetCardDataLoader
       widget={widget}
-      selection={selection}
-      limit={tableItemLimit}
-      onDataFetched={onDataFetched}
       dashboardFilters={dashboardFilters}
+      selection={selection}
+      onDataFetched={onDataFetched}
+      onWidgetSplitDecision={onWidgetSplitDecision}
+      tableItemLimit={tableItemLimit}
     >
       {({
         tableResults,
@@ -169,44 +107,75 @@ export function WidgetCardChartContainer({
         errorMessage,
         loading,
         timeseriesResultsTypes,
+        confidence,
       }) => {
+        if (widget.widgetType === WidgetType.ISSUE) {
+          return (
+            <Fragment>
+              {typeof renderErrorMessage === 'function'
+                ? renderErrorMessage(errorMessage)
+                : null}
+              <LoadingScreen loading={loading} />
+              <IssueWidgetCard
+                transformedResults={tableResults?.[0]!.data ?? []}
+                loading={loading}
+                errorMessage={errorMessage}
+                widget={widget}
+                location={location}
+                selection={selection}
+              />
+            </Fragment>
+          );
+        }
+
+        // Bind timeseries to widget for ability to control each widget's legend individually
+        const modifiedTimeseriesResults =
+          WidgetLegendNameEncoderDecoder.modifyTimeseriesNames(widget, timeseriesResults);
+
         return (
           <Fragment>
             {typeof renderErrorMessage === 'function'
               ? renderErrorMessage(errorMessage)
               : null}
             <WidgetCardChart
-              timeseriesResults={timeseriesResults}
+              timeseriesResults={modifiedTimeseriesResults}
               tableResults={tableResults}
               errorMessage={errorMessage}
               loading={loading}
               location={location}
               widget={widget}
               selection={selection}
-              router={router}
               organization={organization}
               isMobile={isMobile}
               windowWidth={windowWidth}
-              onZoom={onZoom}
-              onLegendSelectChanged={onLegendSelectChanged}
-              legendOptions={legendOptions}
               expandNumbers={expandNumbers}
-              showSlider={showSlider}
-              noPadding={noPadding}
-              chartZoomOptions={chartZoomOptions}
+              onZoom={onZoom}
               timeseriesResultsTypes={timeseriesResultsTypes}
+              noPadding={noPadding}
               chartGroup={chartGroup}
+              shouldResize={shouldResize}
+              onLegendSelectChanged={
+                onLegendSelectChanged ? onLegendSelectChanged : keepLegendState
+              }
+              legendOptions={
+                legendOptions
+                  ? legendOptions
+                  : {selected: widgetLegendState.getWidgetSelectionState(widget)}
+              }
+              widgetLegendState={widgetLegendState}
+              showConfidenceWarning={showConfidenceWarning}
+              confidence={confidence}
             />
           </Fragment>
         );
       }}
-    </WidgetQueries>
+    </WidgetCardDataLoader>
   );
 }
 
 export default WidgetCardChartContainer;
 
-const StyledTransparentLoadingMask = styled(props => (
+const StyledTransparentLoadingMask = styled((props: any) => (
   <TransparentLoadingMask {...props} maskBackgroundColor="transparent" />
 ))`
   display: flex;

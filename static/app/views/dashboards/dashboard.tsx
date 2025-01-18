@@ -5,7 +5,6 @@ import {Component} from 'react';
 import type {Layouts} from 'react-grid-layout';
 import {Responsive, WidthProvider} from 'react-grid-layout';
 import {forceCheck} from 'react-lazyload';
-import type {InjectedRouter} from 'react-router';
 import styled from '@emotion/styled';
 import type {Location} from 'history';
 import cloneDeep from 'lodash/cloneDeep';
@@ -22,11 +21,15 @@ import {IconResize} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import GroupStore from 'sentry/stores/groupStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, PageFilters} from 'sentry/types';
-import {hasDDMFeature} from 'sentry/utils/metrics/features';
+import type {PageFilters} from 'sentry/types/core';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
+import {DatasetSource} from 'sentry/utils/discover/types';
+import {hasCustomMetrics} from 'sentry/utils/metrics/features';
 import theme from 'sentry/utils/theme';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import withApi from 'sentry/utils/withApi';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 import withPageFilters from 'sentry/utils/withPageFilters';
 import {DataSet} from 'sentry/views/dashboards/widgetBuilder/utils';
 
@@ -53,6 +56,7 @@ import SortableWidget from './sortableWidget';
 import type {DashboardDetails, Widget} from './types';
 import {DashboardWidgetSource, WidgetType} from './types';
 import {connectDashboardCharts, getDashboardFiltersFromURL} from './utils';
+import type WidgetLegendSelectionState from './widgetLegendSelectionState';
 
 export const DRAG_HANDLE_CLASS = 'widget-drag';
 const DRAG_RESIZE_CLASS = 'widget-resize';
@@ -85,10 +89,18 @@ type Props = {
   organization: Organization;
   router: InjectedRouter;
   selection: PageFilters;
+  widgetLegendState: WidgetLegendSelectionState;
   widgetLimitReached: boolean;
   handleAddMetricWidget?: (layout?: Widget['layout']) => void;
+  handleChangeSplitDataset?: (widget: Widget, index: number) => void;
   isPreview?: boolean;
   newWidget?: Widget;
+  onAddWidget?: (dataset?: DataSet) => void;
+  onAddWidgetFromNewWidgetBuilder?: (
+    dataset: DataSet,
+    openWidgetTemplates?: boolean
+  ) => void;
+  onEditWidget?: (widget: Widget) => void;
   onSetNewWidget?: () => void;
   paramDashboardId?: string;
   paramTemplateId?: string;
@@ -115,7 +127,7 @@ class Dashboard extends Component<Props, State> {
     };
   }
 
-  static getDerivedStateFromProps(props, state) {
+  static getDerivedStateFromProps(props: any, state: any) {
     if (state.isMobile) {
       // Don't need to recalculate any layout state from props in the mobile view
       // because we want to force different positions (i.e. new widgets added
@@ -216,18 +228,38 @@ class Dashboard extends Component<Props, State> {
   }
 
   handleStartAdd = (dataset?: DataSet) => {
-    const {organization, router, location, paramDashboardId, handleAddMetricWidget} =
-      this.props;
+    const {
+      organization,
+      router,
+      location,
+      paramDashboardId,
+      handleAddMetricWidget,
+      onAddWidget,
+    } = this.props;
 
     if (dataset === DataSet.METRICS) {
       handleAddMetricWidget?.({...this.addWidgetLayout, ...METRIC_WIDGET_MIN_SIZE});
       return;
     }
 
-    if (paramDashboardId) {
+    if (!organization.features.includes('dashboards-widget-builder-redesign')) {
+      if (paramDashboardId) {
+        router.push(
+          normalizeUrl({
+            pathname: `/organizations/${organization.slug}/dashboard/${paramDashboardId}/widget/new/`,
+            query: {
+              ...location.query,
+              source: DashboardWidgetSource.DASHBOARDS,
+              dataset,
+            },
+          })
+        );
+        return;
+      }
+
       router.push(
         normalizeUrl({
-          pathname: `/organizations/${organization.slug}/dashboard/${paramDashboardId}/widget/new/`,
+          pathname: `/organizations/${organization.slug}/dashboards/new/widget/new/`,
           query: {
             ...location.query,
             source: DashboardWidgetSource.DASHBOARDS,
@@ -235,20 +267,11 @@ class Dashboard extends Component<Props, State> {
           },
         })
       );
+
       return;
     }
 
-    router.push(
-      normalizeUrl({
-        pathname: `/organizations/${organization.slug}/dashboards/new/widget/new/`,
-        query: {
-          ...location.query,
-          source: DashboardWidgetSource.DASHBOARDS,
-          dataset,
-        },
-      })
-    );
-
+    onAddWidget?.();
     return;
   };
 
@@ -280,7 +303,18 @@ class Dashboard extends Component<Props, State> {
   };
 
   handleDeleteWidget = (widgetToDelete: Widget) => () => {
-    const {dashboard, onUpdate, isEditingDashboard, handleUpdateWidgetList} = this.props;
+    const {
+      organization,
+      dashboard,
+      onUpdate,
+      isEditingDashboard,
+      handleUpdateWidgetList,
+    } = this.props;
+
+    trackAnalytics('dashboards_views.widget.delete', {
+      organization,
+      widget_type: widgetToDelete.displayType,
+    });
 
     let nextList = dashboard.widgets.filter(widget => widget !== widgetToDelete);
     nextList = generateWidgetsAfterCompaction(nextList);
@@ -293,7 +327,18 @@ class Dashboard extends Component<Props, State> {
   };
 
   handleDuplicateWidget = (widget: Widget, index: number) => () => {
-    const {dashboard, onUpdate, isEditingDashboard, handleUpdateWidgetList} = this.props;
+    const {
+      organization,
+      dashboard,
+      onUpdate,
+      isEditingDashboard,
+      handleUpdateWidgetList,
+    } = this.props;
+
+    trackAnalytics('dashboards_views.widget.duplicate', {
+      organization,
+      widget_type: widget.displayType,
+    });
 
     const widgetCopy = cloneDeep(
       assignTempId({...widget, id: undefined, tempId: undefined})
@@ -309,13 +354,44 @@ class Dashboard extends Component<Props, State> {
     }
   };
 
+  handleChangeSplitDataset = (widget: Widget, index: number) => {
+    const {dashboard, onUpdate, isEditingDashboard, handleUpdateWidgetList} = this.props;
+
+    const widgetCopy = cloneDeep({
+      ...widget,
+      id: undefined,
+    });
+
+    const nextList = [...dashboard.widgets];
+    const nextWidgetData = {
+      ...widgetCopy,
+      widgetType: WidgetType.TRANSACTIONS,
+      datasetSource: DatasetSource.USER,
+      id: widget.id,
+    };
+    nextList[index] = nextWidgetData;
+
+    onUpdate(nextList);
+    if (!isEditingDashboard) {
+      handleUpdateWidgetList(nextList);
+    }
+  };
+
   handleEditWidget = (index: number) => () => {
-    const {organization, router, location, paramDashboardId} = this.props;
+    const {organization, router, location, paramDashboardId, onEditWidget} = this.props;
+    const widget = this.props.dashboard.widgets[index]!;
 
-    const widget = this.props.dashboard.widgets[index];
+    trackAnalytics('dashboards_views.widget.edit', {
+      organization,
+      widget_type: widget.displayType,
+    });
 
-    if (widget.widgetType === WidgetType.METRICS && hasDDMFeature(organization)) {
-      // TODO(ddm): open preview modal
+    if (widget.widgetType === WidgetType.METRICS) {
+      return;
+    }
+
+    if (organization.features.includes('dashboards-widget-builder-redesign')) {
+      onEditWidget?.(widget);
       return;
     }
 
@@ -361,11 +437,13 @@ class Dashboard extends Component<Props, State> {
 
     const widgetProps = {
       widget,
+      widgetLegendState: this.props.widgetLegendState,
       isEditingDashboard,
       widgetLimitReached,
       onDelete: this.handleDeleteWidget(widget),
       onEdit: this.handleEditWidget(index),
       onDuplicate: this.handleDuplicateWidget(widget, index),
+      onSetTransactionsDataset: () => this.handleChangeSplitDataset(widget, index),
 
       isPreview,
 
@@ -378,6 +456,8 @@ class Dashboard extends Component<Props, State> {
       <div key={key} data-grid={widget.layout}>
         <SortableWidget
           {...widgetProps}
+          dashboardPermissions={dashboard.permissions}
+          dashboardCreator={dashboard.createdBy}
           isMobile={isMobile}
           windowWidth={windowWidth}
           index={String(index)}
@@ -386,13 +466,13 @@ class Dashboard extends Component<Props, State> {
     );
   }
 
-  handleLayoutChange = (_, allLayouts: Layouts) => {
+  handleLayoutChange = (_: any, allLayouts: Layouts) => {
     const {isMobile} = this.state;
     const {dashboard, onUpdate} = this.props;
-    const isNotAddButton = ({i}) => i !== ADD_WIDGET_BUTTON_DRAG_ID;
+    const isNotAddButton = ({i}: any) => i !== ADD_WIDGET_BUTTON_DRAG_ID;
     const newLayouts = {
-      [DESKTOP]: allLayouts[DESKTOP].filter(isNotAddButton),
-      [MOBILE]: allLayouts[MOBILE].filter(isNotAddButton),
+      [DESKTOP]: allLayouts[DESKTOP]!.filter(isNotAddButton),
+      [MOBILE]: allLayouts[MOBILE]!.filter(isNotAddButton),
     };
 
     // Generate a new list of widgets where the layouts are associated
@@ -461,7 +541,7 @@ class Dashboard extends Component<Props, State> {
         isMobile: true,
         layouts: {
           ...layouts,
-          [MOBILE]: getMobileLayout(layouts[DESKTOP], widgets),
+          [MOBILE]: getMobileLayout(layouts[DESKTOP]!, widgets),
         },
       });
       return;
@@ -473,7 +553,7 @@ class Dashboard extends Component<Props, State> {
     const {isMobile, layouts} = this.state;
     let position: Position = BOTTOM_MOBILE_VIEW_POSITION;
     if (!isMobile) {
-      const columnDepths = calculateColumnDepths(layouts[DESKTOP]);
+      const columnDepths = calculateColumnDepths(layouts[DESKTOP]!);
       const [nextPosition] = getNextAvailablePosition(columnDepths, 1);
       position = nextPosition;
     }
@@ -487,27 +567,24 @@ class Dashboard extends Component<Props, State> {
 
   render() {
     const {layouts, isMobile} = this.state;
-    const {isEditingDashboard, dashboard, widgetLimitReached, organization} = this.props;
-    let {widgets} = dashboard;
-    // Filter out any issue/release widgets if the user does not have the feature flag
-    widgets = widgets.filter(({widgetType}) => {
-      if (widgetType === WidgetType.RELEASE) {
-        return organization.features.includes('dashboards-rh-widget');
-      }
-      if (widgetType === WidgetType.METRICS) {
-        return hasDDMFeature(organization);
-      }
-      return true;
-    });
+    const {
+      isEditingDashboard,
+      dashboard,
+      widgetLimitReached,
+      organization,
+      isPreview,
+      onAddWidgetFromNewWidgetBuilder,
+    } = this.props;
+    const {widgets} = dashboard;
 
-    const columnDepths = calculateColumnDepths(layouts[DESKTOP]);
+    const columnDepths = calculateColumnDepths(layouts[DESKTOP]!);
 
     const widgetsWithLayout = assignDefaultLayout(widgets, columnDepths);
 
     const canModifyLayout = !isMobile && isEditingDashboard;
 
     const displayInlineAddWidget =
-      hasDDMFeature(organization) &&
+      hasCustomMetrics(organization) &&
       isValidLayout({...this.addWidgetLayout, i: ADD_WIDGET_BUTTON_DRAG_ID});
 
     return (
@@ -537,14 +614,19 @@ class Dashboard extends Component<Props, State> {
         isBounded
       >
         {widgetsWithLayout.map((widget, index) => this.renderWidget(widget, index))}
-        {(isEditingDashboard || displayInlineAddWidget) && !widgetLimitReached && (
-          <AddWidgetWrapper
-            key={ADD_WIDGET_BUTTON_DRAG_ID}
-            data-grid={this.addWidgetLayout}
-          >
-            <AddWidget onAddWidget={this.handleStartAdd} />
-          </AddWidgetWrapper>
-        )}
+        {(isEditingDashboard || displayInlineAddWidget) &&
+          !widgetLimitReached &&
+          !isPreview && (
+            <AddWidgetWrapper
+              key={ADD_WIDGET_BUTTON_DRAG_ID}
+              data-grid={this.addWidgetLayout}
+            >
+              <AddWidget
+                onAddWidget={this.handleStartAdd}
+                onAddWidgetFromNewWidgetBuilder={onAddWidgetFromNewWidgetBuilder}
+              />
+            </AddWidgetWrapper>
+          )}
       </GridLayout>
     );
   }

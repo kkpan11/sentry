@@ -11,7 +11,7 @@ import {
 import IntegrationExternalMappings from './integrationExternalMappings';
 
 describe('IntegrationExternalMappings', function () {
-  const {organization, routerContext} = initializeOrg();
+  const {organization, router} = initializeOrg();
 
   const onCreateMock = jest.fn();
   const onDeleteMock = jest.fn();
@@ -86,7 +86,7 @@ describe('IntegrationExternalMappings', function () {
         sentryNamesMapper={data => data}
       />,
       {
-        context: routerContext,
+        router,
       }
     );
     expect(container).toHaveTextContent('Set up External User Mappings.');
@@ -108,7 +108,7 @@ describe('IntegrationExternalMappings', function () {
         sentryNamesMapper={data => data}
       />,
       {
-        context: routerContext,
+        router,
       }
     );
 
@@ -135,7 +135,7 @@ describe('IntegrationExternalMappings', function () {
         sentryNamesMapper={data => data}
       />,
       {
-        context: routerContext,
+        router,
       }
     );
 
@@ -168,7 +168,7 @@ describe('IntegrationExternalMappings', function () {
         sentryNamesMapper={data => data}
       />,
       {
-        context: routerContext,
+        router,
       }
     );
     renderGlobalModal();
@@ -178,7 +178,7 @@ describe('IntegrationExternalMappings', function () {
     expect(onCreateMock).toHaveBeenCalled();
 
     await userEvent.click(
-      screen.getAllByRole('button', {name: 'Remove user mapping'})[0]
+      screen.getAllByRole('button', {name: 'Remove user mapping'})[0]!
     );
     await userEvent.click(screen.getByTestId('confirm-button'));
     expect(onDeleteMock).toHaveBeenCalled();

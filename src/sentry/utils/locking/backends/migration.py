@@ -1,8 +1,9 @@
-from collections.abc import Callable, Mapping
-from typing import Any, Optional, Union, cast
+from collections.abc import Callable
+from typing import Optional, Union
 
+from sentry.conf.types.service_options import ServiceOptions
 from sentry.utils.locking.backends import LockBackend
-from sentry.utils.services import build_instance_from_options, resolve_callable
+from sentry.utils.services import build_instance_from_options_of_type, resolve_callable
 
 SelectorFncType = Callable[[str, Optional[Union[str, int]], LockBackend, LockBackend], LockBackend]
 
@@ -53,16 +54,14 @@ class MigrationLockBackend(LockBackend):
 
     def __init__(
         self,
-        backend_new_config: Mapping[str, Any],
-        backend_old_config: Mapping[str, Any],
+        backend_new_config: ServiceOptions,
+        backend_old_config: ServiceOptions,
         selector_func_path: str | SelectorFncType | None = None,
     ):
-        self.backend_new = cast(LockBackend, build_instance_from_options(backend_new_config))
-        self.backend_old = cast(LockBackend, build_instance_from_options(backend_old_config))
+        self.backend_new = build_instance_from_options_of_type(LockBackend, backend_new_config)
+        self.backend_old = build_instance_from_options_of_type(LockBackend, backend_old_config)
         self.selector_func: SelectorFncType = (
-            cast(SelectorFncType, resolve_callable(selector_func_path))
-            if selector_func_path
-            else _default_selector_func
+            resolve_callable(selector_func_path) if selector_func_path else _default_selector_func
         )
 
     def _get_backend(self, key: str, routing_key: str | int | None) -> LockBackend:
@@ -83,7 +82,7 @@ class MigrationLockBackend(LockBackend):
             raise Exception(f"Could not set key: {key!r}")
         return backend.acquire(key=key, duration=duration, routing_key=routing_key)
 
-    def release(self, key, routing_key=None):
+    def release(self, key: str, routing_key: str | None = None) -> None:
         backend = self._get_backend(key=key, routing_key=routing_key)
         try:
             (self.backend_new if backend == self.backend_old else self.backend_old).release(
@@ -93,7 +92,7 @@ class MigrationLockBackend(LockBackend):
             pass
         backend.release(key=key, routing_key=routing_key)
 
-    def locked(self, key, routing_key=None):
+    def locked(self, key: str, routing_key: str | None = None) -> bool:
         return self.backend_old.locked(key=key, routing_key=routing_key) or self.backend_new.locked(
             key=key, routing_key=routing_key
         )

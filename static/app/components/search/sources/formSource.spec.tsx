@@ -38,7 +38,7 @@ describe('FormSource', function () {
   });
 
   afterEach(function () {
-    (ActionCreators.loadSearchMap as jest.Mock).mockRestore();
+    jest.mocked(ActionCreators.loadSearchMap).mockRestore();
   });
 
   it('can find a form field', async function () {
@@ -62,7 +62,7 @@ describe('FormSource', function () {
                 route: '/route/',
                 resultType: 'field',
                 sourceType: 'field',
-                to: '/route/#test-field',
+                to: {pathname: '/route/', hash: '#test-field'},
               },
             }),
           ],

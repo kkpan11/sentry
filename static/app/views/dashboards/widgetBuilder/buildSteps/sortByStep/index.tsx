@@ -7,7 +7,8 @@ import FieldGroup from 'sentry/components/forms/fieldGroup';
 import {Tooltip} from 'sentry/components/tooltip';
 import {t, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, SelectValue, TagCollection} from 'sentry/types';
+import type {SelectValue} from 'sentry/types/core';
+import type {TagCollection} from 'sentry/types/group';
 import {getDatasetConfig} from 'sentry/views/dashboards/datasetConfig/base';
 import type {WidgetQuery, WidgetType} from 'sentry/views/dashboards/types';
 import {DisplayType} from 'sentry/views/dashboards/types';
@@ -28,7 +29,6 @@ interface Props {
   displayType: DisplayType;
   onLimitChange: (newLimit: number) => void;
   onSortByChange: (newSortBy: string) => void;
-  organization: Organization;
   queries: WidgetQuery[];
   tags: TagCollection;
   widgetType: WidgetType;
@@ -54,12 +54,12 @@ export function SortByStep({
 
   if (datasetConfig.disableSortOptions) {
     ({disableSort, disableSortDirection, disableSortReason} =
-      datasetConfig.disableSortOptions(queries[0]));
+      datasetConfig.disableSortOptions(queries[0]!));
   }
 
-  const orderBy = queries[0].orderby;
+  const orderBy = queries[0]!.orderby;
   const strippedOrderBy = trimStart(orderBy, '-');
-  const maxLimit = getResultsLimit(queries.length, queries[0].aggregates.length);
+  const maxLimit = getResultsLimit(queries.length, queries[0]!.aggregates.length);
 
   const isTimeseriesChart = [
     DisplayType.LINE,
@@ -115,11 +115,11 @@ export function SortByStep({
           <SortBySelectors
             displayType={displayType}
             widgetType={widgetType}
-            hasGroupBy={isTimeseriesChart && !!queries[0].columns.length}
+            hasGroupBy={isTimeseriesChart && !!queries[0]!.columns.length}
             disableSortReason={disableSortReason}
             disableSort={disableSort}
             disableSortDirection={disableSortDirection}
-            widgetQuery={queries[0]}
+            widgetQuery={queries[0]!}
             values={{
               sortDirection:
                 orderBy[0] === '-'

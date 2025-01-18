@@ -6,7 +6,8 @@ import {render, screen, userEvent} from 'sentry-test/reactTestingLibrary';
 import OrganizationRestore from 'sentry/views/organizationRestore';
 
 describe('OrganizationRestore', function () {
-  let mockUpdate, mockGet;
+  let mockUpdate!: jest.Mock;
+  let mockGet!: jest.Mock;
   const pendingDeleteOrg = OrganizationFixture({
     status: {id: 'pending_deletion', name: 'Pending Deletion'},
   });
@@ -30,10 +31,10 @@ describe('OrganizationRestore', function () {
       status: 200,
       body: pendingDeleteOrg,
     });
-    const {routerProps, routerContext} = initializeOrg<{orgId: string}>({
+    const {routerProps, router} = initializeOrg<{orgId: string}>({
       organization: pendingDeleteOrg,
     });
-    render(<OrganizationRestore {...routerProps} />, {context: routerContext});
+    render(<OrganizationRestore {...routerProps} />, {router});
 
     const text = await screen.findByText(/currently scheduled for deletion/);
     expect(mockGet).toHaveBeenCalled();
@@ -49,10 +50,10 @@ describe('OrganizationRestore', function () {
       body: pendingDeleteOrg,
     });
 
-    const {routerProps, routerContext} = initializeOrg<{orgId: string}>({
+    const {routerProps, router} = initializeOrg<{orgId: string}>({
       organization: pendingDeleteOrg,
     });
-    render(<OrganizationRestore {...routerProps} />, {context: routerContext});
+    render(<OrganizationRestore {...routerProps} />, {router});
 
     const button = await screen.findByTestId('form-submit');
     await userEvent.click(button);
@@ -71,10 +72,10 @@ describe('OrganizationRestore', function () {
       body: deleteInProgressOrg,
     });
 
-    const {routerProps, routerContext} = initializeOrg<{orgId: string}>({
+    const {routerProps, router} = initializeOrg<{orgId: string}>({
       organization: deleteInProgressOrg,
     });
-    render(<OrganizationRestore {...routerProps} />, {context: routerContext});
+    render(<OrganizationRestore {...routerProps} />, {router});
 
     const text = await screen.findByText(
       /organization is currently in progress of being deleted/

@@ -12,14 +12,14 @@ import {
   isMultiSeriesStats,
 } from 'sentry/components/charts/utils';
 import {t} from 'sentry/locale';
+import type {DateString} from 'sentry/types/core';
+import type {Series, SeriesDataUnit} from 'sentry/types/echarts';
 import type {
-  DateString,
   EventsStats,
   EventsStatsData,
   MultiSeriesEventsStats,
   OrganizationSummary,
-} from 'sentry/types';
-import type {Series, SeriesDataUnit} from 'sentry/types/echarts';
+} from 'sentry/types/organization';
 import {defined} from 'sentry/utils';
 import {DURATION_UNITS, SIZE_UNITS} from 'sentry/utils/discover/fieldRenderers';
 import type {AggregationOutputType} from 'sentry/utils/discover/fields';
@@ -70,10 +70,6 @@ type DefaultProps = {
    */
   includePrevious: boolean;
   /**
-   * Transform the response data to be something ingestible by charts
-   */
-  includeTransformedData: boolean;
-  /**
    * Interval to group results in
    *
    * e.g. 1d, 1h, 1m, 1s
@@ -95,6 +91,10 @@ type DefaultProps = {
    * Absolute end date for query
    */
   end?: DateString;
+  /**
+   * Transform the response data to be something ingestible by charts
+   */
+  includeTransformedData?: boolean;
   /**
    * Relative time period for query.
    *
@@ -189,7 +189,7 @@ type EventsRequestPartialProps = {
   /**
    * Extra query parameters to be added.
    */
-  queryExtras?: Record<string, string>;
+  queryExtras?: Record<string, string | boolean | number>;
   /**
    * A unique name for what's triggering this request, see organization_events_stats for an allowlist
    */
@@ -216,6 +216,10 @@ type EventsRequestPartialProps = {
    * This is a temporary flag to allow us to test on demand metrics
    */
   useOnDemandMetrics?: boolean;
+  /**
+   * Whether or not to use RPCs instead of SnQL requests in the backend.
+   */
+  useRpc?: boolean;
   /**
    * Whether or not to zerofill results
    */
@@ -315,7 +319,7 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
       errorMessage: undefined,
     }));
 
-    let errorMessage;
+    let errorMessage: any;
     if (expired) {
       errorMessage = t(
         '%s has an invalid date range. Please try a more recent date range.',
@@ -421,7 +425,7 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
       seriesName: seriesName ?? 'Previous',
       data: this.calculateTotalsPerTimestamp(
         previous,
-        (_timestamp, _countArray, i) => current[i][0] * 1000
+        (_timestamp, _countArray, i) => current[i]![0] * 1000
       ),
       stack: 'previous',
     };
@@ -449,7 +453,10 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
     if (seriesName) {
       const unit = meta?.units?.[getAggregateAlias(seriesName)];
       // Scale series values to milliseconds or bytes depending on units from meta
-      scale = (unit && (DURATION_UNITS[unit] ?? SIZE_UNITS[unit])) ?? 1;
+      scale =
+        ((unit &&
+          (DURATION_UNITS[unit as keyof typeof DURATION_UNITS] ??
+            SIZE_UNITS[unit as keyof typeof SIZE_UNITS])) as number) ?? 1;
     }
 
     return [
@@ -569,7 +576,7 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
             seriesName: string,
             index: number
           ): [number, Series, Series | null, AdditionalSeriesInfo] => {
-            const seriesData: EventsStats = timeseriesData[seriesName];
+            const seriesData: EventsStats = timeseriesData[seriesName]!;
             const processedData = this.processData(
               seriesData,
               index,
@@ -585,7 +592,7 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
             }
             return [
               seriesData.order || 0,
-              processedData.data[0],
+              processedData.data[0]!,
               processedData.previousData,
               {isMetricsData: processedData.isMetricsData},
             ];
@@ -594,7 +601,7 @@ class EventsRequest extends PureComponent<EventsRequestProps, EventsRequestState
         .sort((a, b) => a[0] - b[0]);
       const timeseriesResultsTypes: Record<string, AggregationOutputType> = {};
       Object.keys(timeseriesData).forEach(key => {
-        const fieldsMeta = timeseriesData[key].meta?.fields[getAggregateAlias(key)];
+        const fieldsMeta = timeseriesData[key]!.meta?.fields[getAggregateAlias(key)];
         if (fieldsMeta) {
           timeseriesResultsTypes[key] = fieldsMeta;
         }

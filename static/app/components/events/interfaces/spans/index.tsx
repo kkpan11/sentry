@@ -1,5 +1,4 @@
 import {Fragment, useMemo} from 'react';
-// eslint-disable-next-line no-restricted-imports
 import styled from '@emotion/styled';
 import {Observer} from 'mobx-react';
 
@@ -9,10 +8,10 @@ import Panel from 'sentry/components/panels/panel';
 import SearchBar from 'sentry/components/searchBar';
 import {t, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
 import type {EventTransaction} from 'sentry/types/event';
-import {objectIsEmpty} from 'sentry/utils';
+import type {Organization} from 'sentry/types/organization';
 import {trackAnalytics} from 'sentry/utils/analytics';
+import {isEmptyObject} from 'sentry/utils/object/isEmptyObject';
 import {QuickTraceContext} from 'sentry/utils/performance/quickTrace/quickTraceContext';
 import type {
   TraceError,
@@ -101,7 +100,7 @@ function SpansInterface({event, affectedSpanIds, organization}: Props) {
   };
 
   return (
-    <Container hasErrors={!objectIsEmpty(event.errors)}>
+    <Container hasErrors={!isEmptyObject(event.errors)}>
       <QuickTraceContext.Consumer>
         {quickTrace => {
           const errors: TraceError[] | undefined =

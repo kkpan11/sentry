@@ -8,8 +8,11 @@ import {LineChart} from 'sentry/components/charts/lineChart';
 import {RELATIVE_DAYS_WINDOW} from 'sentry/components/events/eventStatisticalDetector/consts';
 import * as SidebarSection from 'sentry/components/sidebarSection';
 import {t} from 'sentry/locale';
-import type {Event, EventsStatsData, Group, PageFilters} from 'sentry/types';
-import {IssueType} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
+import type {Event} from 'sentry/types/event';
+import type {Group} from 'sentry/types/group';
+import {IssueType} from 'sentry/types/group';
+import type {EventsStatsData} from 'sentry/types/organization';
 import {defined} from 'sentry/utils';
 import {axisLabelFormatter, tooltipFormatter} from 'sentry/utils/discover/charts';
 import type {MetaType} from 'sentry/utils/discover/eventView';
@@ -18,14 +21,14 @@ import {RateUnit} from 'sentry/utils/discover/fields';
 import type {DiscoverQueryProps} from 'sentry/utils/discover/genericDiscoverQuery';
 import {useGenericDiscoverQuery} from 'sentry/utils/discover/genericDiscoverQuery';
 import {DiscoverDatasets} from 'sentry/utils/discover/types';
-import {formatPercentage, formatRate} from 'sentry/utils/formatters';
+import {formatRate} from 'sentry/utils/formatters';
+import {formatPercentage} from 'sentry/utils/number/formatPercentage';
 import {useProfileEventsStats} from 'sentry/utils/profiling/hooks/useProfileEventsStats';
 import {useRelativeDateTime} from 'sentry/utils/profiling/hooks/useRelativeDateTime';
 import {MutableSearch} from 'sentry/utils/tokenizeSearch';
 import {useLocation} from 'sentry/utils/useLocation';
 import useOrganization from 'sentry/utils/useOrganization';
-import useRouter from 'sentry/utils/useRouter';
-import {transformEventStats} from 'sentry/views/performance/trends/chart';
+import transformEventStats from 'sentry/views/performance/trends/utils/transformEventStats';
 
 const BUCKET_SIZE = 6 * 60 * 60; // 6 hours in seconds;
 
@@ -50,7 +53,6 @@ export function EventThroughput({event, group}: EventThroughputProps) {
 
 function EventThroughputInner({event, group}: EventThroughputProps) {
   const theme = useTheme();
-  const router = useRouter();
 
   const evidenceData = event.occurrence!.evidenceData;
   const breakpoint = evidenceData.breakpoint;
@@ -96,9 +98,12 @@ function EventThroughputInner({event, group}: EventThroughputProps) {
 
   const series = useMemo(() => {
     const result = transformEventStats(
-      stats.series.map(item => [item.timestamp, [{count: item.value / item.interval}]]),
+      stats.series.map((item: any) => [
+        item.timestamp,
+        [{count: item.value / item.interval}],
+      ]),
       'throughput()'
-    )[0];
+    )[0]!;
 
     result.markLine = {
       data: [
@@ -179,7 +184,7 @@ function EventThroughputInner({event, group}: EventThroughputProps) {
       ) : (
         <CompareLabel>{'\u2014'}</CompareLabel>
       )}
-      <ChartZoom router={router} {...datetime}>
+      <ChartZoom {...datetime}>
         {zoomRenderProps => (
           <LineChart {...zoomRenderProps} {...chartOptions} series={series} />
         )}
@@ -227,9 +232,9 @@ function useThroughputStats({datetime, event, group}: UseThroughputStatsOptions)
       return [];
     }
 
-    const rawData = functionStats?.data?.data?.find(({axis}) => axis === 'count()');
+    const rawData = functionStats?.data?.data?.find(({axis}: any) => axis === 'count()');
     const timestamps = functionStats?.data?.timestamps ?? [];
-    return timestamps.reduce((acc, timestamp, idx) => {
+    return timestamps.reduce((acc: any, timestamp: any, idx: any) => {
       const bucket = Math.floor(timestamp / BUCKET_SIZE) * BUCKET_SIZE;
       const prev: DataBucket = acc[acc.length - 1];
       const value = rawData.values[idx];
@@ -291,7 +296,7 @@ function useThroughputStats({datetime, event, group}: UseThroughputStatsOptions)
     if (data.length < 2) {
       return null;
     }
-    return data[1][0] - data[0][0];
+    return data[1]![0] - data[0]![0];
   }, [transactionStats?.data]);
 
   const transactionData = useMemo(() => {
@@ -303,7 +308,7 @@ function useThroughputStats({datetime, event, group}: UseThroughputStatsOptions)
       const timestamp = curr[0];
       const bucket = Math.floor(timestamp / BUCKET_SIZE) * BUCKET_SIZE;
       const prev = acc[acc.length - 1];
-      const value = curr[1][0].count;
+      const value = curr[1]![0]!.count;
 
       if (prev?.timestamp === bucket) {
         prev.value += value;
@@ -320,7 +325,7 @@ function useThroughputStats({datetime, event, group}: UseThroughputStatsOptions)
 
   if (statsType === 'functions' && functionInterval) {
     return {
-      isLoading: functionStats.isLoading,
+      isLoading: functionStats.isPending,
       isError: functionStats.isError,
       series: functionData,
     };
@@ -328,7 +333,7 @@ function useThroughputStats({datetime, event, group}: UseThroughputStatsOptions)
 
   if (statsType === 'transactions' && transactionInterval) {
     return {
-      isLoading: transactionStats.isLoading,
+      isLoading: transactionStats.isPending,
       isError: transactionStats.isError,
       series: transactionData,
     };

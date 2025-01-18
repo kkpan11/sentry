@@ -24,7 +24,7 @@ const PRISM_LANGUAGE_MAP: Record<string, string> = Object.fromEntries(
     return [
       [lang, lang], // map the full language name to itself
       ...(Array.isArray(value.alias) // map aliases to full language name
-        ? value.alias.map(alias => [alias, lang])
+        ? value.alias.map((alias: any) => [alias, lang])
         : [[value.alias, lang]]),
     ];
   })
@@ -55,6 +55,12 @@ const EXTRA_LANGUAGE_ALIASES: Record<string, string> = {
   bundle: 'javascript',
   vue: 'javascript',
   svelte: 'javascript',
+  'js?': 'javascript',
+
+  // Clojure
+  clj: 'clojure',
+  cljc: 'clojure',
+  cljs: 'clojure',
 };
 
 export const getPrismLanguage = (lang: string) => {
@@ -77,7 +83,7 @@ export async function loadPrismLanguage(
     onLoad,
     suppressExistenceWarning,
   }: {
-    onError?: (error) => void;
+    onError?: (error: any) => void;
     onLoad?: () => void;
     suppressExistenceWarning?: boolean;
   }
@@ -86,7 +92,7 @@ export async function loadPrismLanguage(
     const language: string | undefined = getPrismLanguage(lang);
 
     // Short-circuit if language already loaded
-    if (Prism.languages[language]) {
+    if (Prism.languages[language!]) {
       onLoad?.();
       return;
     }

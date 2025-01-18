@@ -1,23 +1,22 @@
 import type {Theme} from '@emotion/react';
 import type {Location} from 'history';
 import pick from 'lodash/pick';
-import type {Moment} from 'moment';
-import moment from 'moment';
+import type {Moment} from 'moment-timezone';
+import moment from 'moment-timezone';
 
 import MarkLine from 'sentry/components/charts/components/markLine';
 import {parseStatsPeriod} from 'sentry/components/timeRangeSelector/utils';
 import {URL_PARAM} from 'sentry/constants/pageFilters';
 import {t} from 'sentry/locale';
+import type {Series} from 'sentry/types/echarts';
 import type {
   Commit,
   CommitFile,
   FilesByRepository,
-  ReleaseProject,
-  ReleaseWithHealth,
   Repository,
-} from 'sentry/types';
-import {ReleaseComparisonChartType} from 'sentry/types';
-import type {Series} from 'sentry/types/echarts';
+} from 'sentry/types/integrations';
+import type {ReleaseProject, ReleaseWithHealth} from 'sentry/types/release';
+import {ReleaseComparisonChartType} from 'sentry/types/release';
 import {decodeList} from 'sentry/utils/queryString';
 
 import {getReleaseBounds, getReleaseParams, isMobileRelease} from '../utils';
@@ -36,18 +35,21 @@ export function getFilesByRepository(fileList: CommitFile[]) {
       filesByRepository[repoName] = {};
     }
 
-    if (!filesByRepository[repoName].hasOwnProperty(filename)) {
-      filesByRepository[repoName][filename] = {
+    if (!filesByRepository[repoName]!.hasOwnProperty(filename)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      filesByRepository[repoName]![filename] = {
         authors: {},
         types: new Set(),
       };
     }
 
     if (author.email) {
-      filesByRepository[repoName][filename].authors[author.email] = author;
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      filesByRepository[repoName]![filename].authors[author.email] = author;
     }
 
-    filesByRepository[repoName][filename].types.add(type);
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+    filesByRepository[repoName]![filename].types.add(type);
 
     return filesByRepository;
   }, {});
@@ -64,7 +66,7 @@ export function getCommitsByRepository(commitList: Commit[]): CommitsByRepositor
       commitsByRepository[repositoryName] = [];
     }
 
-    commitsByRepository[repositoryName].push(commit);
+    commitsByRepository[repositoryName]!.push(commit);
 
     return commitsByRepository;
   }, {});
@@ -143,7 +145,9 @@ export const releaseComparisonChartTitles = {
   [ReleaseComparisonChartType.FAILURE_RATE]: t('Failure Rate'),
 };
 
-export const releaseComparisonChartHelp = {
+export const releaseComparisonChartHelp: Partial<
+  Record<ReleaseComparisonChartType, string>
+> = {
   [ReleaseComparisonChartType.CRASH_FREE_SESSIONS]:
     commonTermsDescription[SessionTerm.CRASH_FREE_SESSIONS],
   [ReleaseComparisonChartType.CRASH_FREE_USERS]:
@@ -180,7 +184,7 @@ function generateReleaseMarkLine(
       label: {
         position: 'insideEndBottom',
         formatter: hideLabel ? '' : title,
-        // @ts-expect-error weird echart types
+        // @ts-ignore TS(2322): Type '{ position: "insideEndBottom"; formatter: st... Remove this comment to see the full error message
         font: 'Rubik',
         fontSize: 14,
         color: theme.chartLabel,

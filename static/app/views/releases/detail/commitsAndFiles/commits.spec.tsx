@@ -1,4 +1,3 @@
-import selectEvent from 'react-select-event';
 import {CommitFixture} from 'sentry-fixture/commit';
 import {ReleaseFixture} from 'sentry-fixture/release';
 import {ReleaseProjectFixture} from 'sentry-fixture/releaseProject';
@@ -6,9 +5,9 @@ import {RepositoryFixture} from 'sentry-fixture/repository';
 
 import {initializeOrg} from 'sentry-test/initializeOrg';
 import {render, screen} from 'sentry-test/reactTestingLibrary';
+import selectEvent from 'sentry-test/selectEvent';
 
-import RepositoryStore from 'sentry/stores/repositoryStore';
-import type {ReleaseProject} from 'sentry/types';
+import type {ReleaseProject} from 'sentry/types/release';
 import {ReleaseContext} from 'sentry/views/releases/detail';
 
 import Commits from './commits';
@@ -16,7 +15,7 @@ import Commits from './commits';
 describe('Commits', () => {
   const release = ReleaseFixture();
   const project = ReleaseProjectFixture() as Required<ReleaseProject>;
-  const {routerProps, routerContext, organization} = initializeOrg({
+  const {router, organization} = initializeOrg({
     router: {params: {release: release.version}},
   });
   const repos = [RepositoryFixture({integrationId: '1'})];
@@ -34,9 +33,9 @@ describe('Commits', () => {
           releaseMeta: {} as any,
         }}
       >
-        <Commits releaseRepos={[]} projectSlug={project.slug} {...routerProps} />
+        <Commits />
       </ReleaseContext.Provider>,
-      {context: routerContext}
+      {router}
     );
   }
 
@@ -46,7 +45,12 @@ describe('Commits', () => {
       url: `/organizations/${organization.slug}/repos/`,
       body: repos,
     });
-    RepositoryStore.init();
+    MockApiClient.addMockResponse({
+      url: `/projects/${organization.slug}/${project.slug}/releases/${encodeURIComponent(
+        release.version
+      )}/repositories/`,
+      body: repos,
+    });
   });
 
   it('should render no repositories message', async () => {
@@ -68,7 +72,7 @@ describe('Commits', () => {
       body: repos,
     });
     MockApiClient.addMockResponse({
-      url: `/organizations/org-slug/releases/${encodeURIComponent(
+      url: `/projects/org-slug/project-slug/releases/${encodeURIComponent(
         release.version
       )}/commits/`,
       body: [],
@@ -85,7 +89,7 @@ describe('Commits', () => {
       body: repos,
     });
     MockApiClient.addMockResponse({
-      url: `/organizations/org-slug/releases/${encodeURIComponent(
+      url: `/projects/org-slug/project-slug/releases/${encodeURIComponent(
         release.version
       )}/commits/`,
       body: [CommitFixture()],
@@ -112,7 +116,7 @@ describe('Commits', () => {
       ],
     });
     MockApiClient.addMockResponse({
-      url: `/organizations/org-slug/releases/${encodeURIComponent(
+      url: `/projects/org-slug/project-slug/releases/${encodeURIComponent(
         release.version
       )}/commits/`,
       body: [CommitFixture()],
@@ -120,8 +124,10 @@ describe('Commits', () => {
     renderComponent();
     expect(await screen.findByRole('button')).toHaveTextContent('example/repo-name');
     expect(screen.queryByText('getsentry/sentry-frontend')).not.toBeInTheDocument();
-    selectEvent.openMenu(screen.getByRole('button'));
-    expect(screen.getByText('getsentry/sentry-frontend')).toBeInTheDocument();
+    await selectEvent.openMenu(
+      screen.getByRole('button', {name: 'Filter example/repo-name'})
+    );
+    expect(await screen.findByText('getsentry/sentry-frontend')).toBeInTheDocument();
   });
 
   it('should render the commits from the selected repo', async () => {
@@ -131,7 +137,7 @@ describe('Commits', () => {
       integrationId: '1',
     });
     // Current repo is stored in query parameter activeRepo
-    const {routerContext: newRouterContext, routerProps: newRouterProps} = initializeOrg({
+    const {router: newRouterContext} = initializeOrg({
       router: {
         params: {release: release.version},
         location: {query: {activeRepo: otherRepo.name}},
@@ -144,7 +150,7 @@ describe('Commits', () => {
       body: [repos[0]!, otherRepo],
     });
     MockApiClient.addMockResponse({
-      url: `/organizations/org-slug/releases/${encodeURIComponent(
+      url: `/projects/org-slug/project-slug/releases/${encodeURIComponent(
         release.version
       )}/commits/`,
       body: [
@@ -166,9 +172,9 @@ describe('Commits', () => {
           releaseMeta: {} as any,
         }}
       >
-        <Commits releaseRepos={[]} projectSlug={project.slug} {...newRouterProps} />
+        <Commits />
       </ReleaseContext.Provider>,
-      {context: newRouterContext}
+      {router: newRouterContext}
     );
     expect(await screen.findByRole('button')).toHaveTextContent(otherRepo.name);
     expect(screen.queryByText('example/repo-name')).not.toBeInTheDocument();

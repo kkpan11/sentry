@@ -1,4 +1,3 @@
-// eslint-disable-next-line no-restricted-imports
 import type {ReactEventHandler} from 'react';
 import styled from '@emotion/styled';
 
@@ -12,10 +11,12 @@ type Props = {
   onNext: ReactEventHandler;
   onPrevious: ReactEventHandler;
   previousDisabled: boolean;
+  className?: string;
   headerText?: React.ReactNode;
 };
 
 function ScreenshotPagination({
+  className,
   previousDisabled,
   nextDisabled,
   headerText,
@@ -23,7 +24,7 @@ function ScreenshotPagination({
   onNext,
 }: Props) {
   return (
-    <Wrapper lightText>
+    <Wrapper className={className} lightText>
       <Button
         icon={<IconChevron direction="left" />}
         aria-label={t('Previous')}

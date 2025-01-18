@@ -1,17 +1,18 @@
 import round from 'lodash/round';
 
 import {t} from 'sentry/locale';
-import type {Organization} from 'sentry/types';
-import {SessionFieldWithOperation} from 'sentry/types';
-import type {IssueAlertRule} from 'sentry/types/alerts';
+import type {Organization} from 'sentry/types/organization';
+import {SessionFieldWithOperation} from 'sentry/types/organization';
 import {defined} from 'sentry/utils';
+import toArray from 'sentry/utils/array/toArray';
 import {getUtcDateString} from 'sentry/utils/dates';
 import {axisLabelFormatter, tooltipFormatter} from 'sentry/utils/discover/charts';
 import {aggregateOutputType} from 'sentry/utils/discover/fields';
-import {formatMetricUsingFixedUnit} from 'sentry/utils/metrics/formatters';
+import {
+  formatMetricUsingFixedUnit,
+  formatMetricUsingUnit,
+} from 'sentry/utils/metrics/formatters';
 import {parseField, parseMRI} from 'sentry/utils/metrics/mri';
-import toArray from 'sentry/utils/toArray';
-import type {MetricRule, SavedMetricRule} from 'sentry/views/alerts/rules/metric/types';
 import {
   Dataset,
   Datasource,
@@ -20,25 +21,23 @@ import {
 } from 'sentry/views/alerts/rules/metric/types';
 import {isCustomMetricAlert} from 'sentry/views/alerts/rules/metric/utils/isCustomMetricAlert';
 
-import type {Incident, IncidentStats} from '../types';
-import {AlertRuleStatus} from '../types';
+import type {CombinedAlerts, Incident, IncidentStats} from '../types';
+import {AlertRuleStatus, CombinedAlertType} from '../types';
 
 /**
  * Gets start and end date query parameters from stats
  */
 export function getStartEndFromStats(stats: IncidentStats) {
-  const start = getUtcDateString(stats.eventStats.data[0][0] * 1000);
+  const start = getUtcDateString(stats.eventStats.data[0]![0] * 1000);
   const end = getUtcDateString(
-    stats.eventStats.data[stats.eventStats.data.length - 1][0] * 1000
+    stats.eventStats.data[stats.eventStats.data.length - 1]![0] * 1000
   );
 
   return {start, end};
 }
 
-export function isIssueAlert(
-  data: IssueAlertRule | SavedMetricRule | MetricRule
-): data is IssueAlertRule {
-  return !data.hasOwnProperty('triggers');
+export function isIssueAlert(data: CombinedAlerts) {
+  return data.type === CombinedAlertType.ISSUE;
 }
 
 export const DATA_SOURCE_LABELS = {
@@ -116,9 +115,11 @@ export function getQueryDatasource(
   }
 
   match = query.match(/(^|\s)event\.type:(error|default|transaction)/i);
-  if (match && Datasource[match[2].toUpperCase()]) {
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+  if (match && Datasource[match[2]!.toUpperCase()]) {
     return {
-      source: Datasource[match[2].toUpperCase()],
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      source: Datasource[match[2]!.toUpperCase()],
       query: query.replace(match[0], '').trim(),
     };
   }
@@ -141,12 +142,18 @@ export function alertAxisFormatter(value: number, seriesName: string, aggregate:
   }
 
   if (isCustomMetricAlert(aggregate)) {
-    const {mri, op} = parseField(aggregate)!;
+    const {mri, aggregation} = parseField(aggregate)!;
     const {unit} = parseMRI(mri)!;
-    return formatMetricUsingFixedUnit(value, unit, op);
+    return formatMetricUsingFixedUnit(value, unit, aggregation);
   }
 
-  return axisLabelFormatter(value, aggregateOutputType(seriesName));
+  const type = aggregateOutputType(seriesName);
+
+  if (type === 'duration') {
+    return formatMetricUsingUnit(value, 'milliseconds');
+  }
+
+  return axisLabelFormatter(value, type);
 }
 
 export function alertTooltipValueFormatter(
@@ -159,9 +166,9 @@ export function alertTooltipValueFormatter(
   }
 
   if (isCustomMetricAlert(aggregate)) {
-    const {mri, op} = parseField(aggregate)!;
+    const {mri, aggregation} = parseField(aggregate)!;
     const {unit} = parseMRI(mri)!;
-    return formatMetricUsingFixedUnit(value, unit, op);
+    return formatMetricUsingFixedUnit(value, unit, aggregation);
   }
 
   return tooltipFormatter(value, aggregateOutputType(seriesName));

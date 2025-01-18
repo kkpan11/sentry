@@ -9,8 +9,10 @@ import {
   waitFor,
 } from 'sentry-test/reactTestingLibrary';
 
+import ModalStore from 'sentry/stores/modalStore';
 import TeamStore from 'sentry/stores/teamStore';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import ProjectTeams from 'sentry/views/settings/project/projectTeams';
 
 describe('ProjectTeams', function () {
@@ -64,6 +66,7 @@ describe('ProjectTeams', function () {
 
   afterEach(function () {
     MockApiClient.clearMockResponses();
+    ModalStore.reset();
   });
 
   it('can remove a team from project', async function () {
@@ -93,29 +96,33 @@ describe('ProjectTeams', function () {
 
     expect(mock1).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]!);
 
     renderGlobalModal();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Remove Team'));
-    expect(mock1).toHaveBeenCalledWith(
-      endpoint1,
-      expect.objectContaining({
-        method: 'DELETE',
-      })
-    );
+    await waitFor(() => {
+      expect(mock1).toHaveBeenCalledWith(
+        endpoint1,
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
     expect(screen.queryByText('#team-slug')).not.toBeInTheDocument();
 
     // Remove second team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]!);
     await userEvent.click(screen.getByText('Remove Team'));
-    expect(mock2).toHaveBeenCalledWith(
-      endpoint2,
-      expect.objectContaining({
-        method: 'DELETE',
-      })
-    );
+    await waitFor(() => {
+      expect(mock2).toHaveBeenCalledWith(
+        endpoint2,
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
   });
 
   it('cannot remove a team without admin scopes', async function () {
@@ -144,19 +151,21 @@ describe('ProjectTeams', function () {
     expect(await screen.findByText('Project Teams for project-slug')).toBeInTheDocument();
 
     // Remove first team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]!);
     renderGlobalModal();
     await userEvent.click(screen.getByText('Remove Team'));
-    expect(mock1).toHaveBeenCalledWith(
-      endpoint1,
-      expect.objectContaining({
-        method: 'DELETE',
-      })
-    );
+    await waitFor(() => {
+      expect(mock1).toHaveBeenCalledWith(
+        endpoint1,
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
     expect(screen.queryByText('#team-slug')).not.toBeInTheDocument();
 
     // Remove third team, but button should be disabled
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[1]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[1]!);
     expect(mock3).not.toHaveBeenCalled();
   });
 
@@ -192,19 +201,21 @@ describe('ProjectTeams', function () {
     expect(mock1).not.toHaveBeenCalled();
 
     // Remove first team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]!);
     renderGlobalModal();
     await userEvent.click(screen.getByText('Remove Team'));
-    expect(mock1).toHaveBeenCalledWith(
-      endpoint1,
-      expect.objectContaining({
-        method: 'DELETE',
-      })
-    );
+    await waitFor(() => {
+      expect(mock1).toHaveBeenCalledWith(
+        endpoint1,
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
     expect(screen.queryByText('#team-slug')).not.toBeInTheDocument();
 
     // Remove second team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Remove'})[0]!);
 
     // Modal opens because this is the last team in project
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -212,12 +223,14 @@ describe('ProjectTeams', function () {
     // Click confirm
     await userEvent.click(screen.getByText('Remove Team'));
 
-    expect(mock2).toHaveBeenCalledWith(
-      endpoint2,
-      expect.objectContaining({
-        method: 'DELETE',
-      })
-    );
+    await waitFor(() => {
+      expect(mock2).toHaveBeenCalledWith(
+        endpoint2,
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+    });
   });
 
   it('can associate a team with project', async function () {
@@ -235,15 +248,17 @@ describe('ProjectTeams', function () {
     expect(mock).not.toHaveBeenCalled();
 
     // Add a team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Add Team'})[1]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Add Team'})[1]!);
     await userEvent.click(screen.getByText('#team-slug-2'));
 
-    expect(mock).toHaveBeenCalledWith(
-      endpoint,
-      expect.objectContaining({
-        method: 'POST',
-      })
-    );
+    await waitFor(() => {
+      expect(mock).toHaveBeenCalledWith(
+        endpoint,
+        expect.objectContaining({
+          method: 'POST',
+        })
+      );
+    });
   });
 
   it('creates a new team adds it to current project using the "create team modal" in dropdown', async function () {
@@ -270,7 +285,7 @@ describe('ProjectTeams', function () {
     expect(await screen.findByText('Project Teams for project-slug')).toBeInTheDocument();
 
     // Add new team
-    await userEvent.click(screen.getAllByRole('button', {name: 'Add Team'})[1]);
+    await userEvent.click(screen.getAllByRole('button', {name: 'Add Team'})[1]!);
 
     // XXX(epurkhiser): Create Team should really be a button
     await userEvent.click(screen.getByRole('link', {name: 'Create Team'}));

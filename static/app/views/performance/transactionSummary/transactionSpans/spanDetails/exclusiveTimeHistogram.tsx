@@ -12,7 +12,7 @@ import Placeholder from 'sentry/components/placeholder';
 import QuestionTooltip from 'sentry/components/questionTooltip';
 import {IconWarning} from 'sentry/icons';
 import {t} from 'sentry/locale';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
 import {axisLabelFormatter, tooltipFormatter} from 'sentry/utils/discover/charts';
 import type EventView from 'sentry/utils/discover/eventView';
 import {aggregateOutputType} from 'sentry/utils/discover/fields';
@@ -137,7 +137,7 @@ export function Chart(props: ChartProps) {
     tooltip: {
       trigger: 'axis' as const,
       // TODO (udameli) pull series name from the meta
-      valueFormatter: (value, _seriesName) =>
+      valueFormatter: (value: any, _seriesName: any) =>
         tooltipFormatter(value, aggregateOutputType(_seriesName)),
     },
     yAxis: {

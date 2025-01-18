@@ -1,4 +1,5 @@
-import type {IssueType, PlatformKey} from 'sentry/types';
+import type {IssueType} from 'sentry/types/group';
+import type {PlatformKey} from 'sentry/types/project';
 
 export type ResourceLink = {
   link: string;
@@ -20,6 +21,7 @@ export type IssueTypeConfig = {
     deleteAndDiscard: DisabledWithReasonConfig;
     ignore: DisabledWithReasonConfig;
     merge: DisabledWithReasonConfig;
+    resolve: DisabledWithReasonConfig;
     resolveInRelease: DisabledWithReasonConfig;
     share: DisabledWithReasonConfig;
   };
@@ -28,9 +30,24 @@ export type IssueTypeConfig = {
    */
   attachments: DisabledWithReasonConfig;
   /**
+   * Should show Autofix for this issue type
+   */
+  autofix: boolean;
+  /**
+   * Custom copy for actions and other UI elements
+   */
+  customCopy: {
+    allEvents: string;
+    resolution: string;
+  };
+  /**
    * Is the "Open in Discover" button available for this issue
    */
   discover: DisabledWithReasonConfig;
+  /**
+   * Is the Event and User Counts shown for this issue
+   */
+  eventAndUserCounts: DisabledWithReasonConfig;
   /**
    * Is the Events tab show for this issue
    */
@@ -42,10 +59,27 @@ export type IssueTypeConfig = {
     title: string;
     helpText?: string;
   } | null;
+  filterAndSearchHeader: DisabledWithReasonConfig;
+  /**
+   * Is the Issue Summary available for this issue
+   */
+  issueSummary: DisabledWithReasonConfig;
+  /**
+   * Is the Log Level icon shown for this issue
+   */
+  logLevel: DisabledWithReasonConfig;
   /**
    * Is the Merged Issues tab shown for this issue
    */
   mergedIssues: DisabledWithReasonConfig;
+  /**
+   * Shows performance duration regression components
+   */
+  performanceDurationRegression: DisabledWithReasonConfig;
+  /**
+   * Shows profiling duration regression components
+   */
+  profilingDurationRegression: DisabledWithReasonConfig;
   /**
    * Enables various regression related supporting data for an issue type.
    */
@@ -77,14 +111,23 @@ export type IssueTypeConfig = {
    * Is the Similar Issues tab shown for this issue
    */
   similarIssues: DisabledWithReasonConfig;
+  spanEvidence: DisabledWithReasonConfig;
+  /**
+   * Is the Stacktrace shown for this issue
+   */
+  stacktrace: DisabledWithReasonConfig;
   /**
    * Are group stats (counts/time series) shown for this issue.
    */
   stats: DisabledWithReasonConfig;
   /**
-   * Is the Tags tab show for this issue
+   * Are event tags or highlights shown for this issue
    */
   tags: DisabledWithReasonConfig;
+  /**
+   * Is the Tags tab show for this issue
+   */
+  tagsTab: DisabledWithReasonConfig;
   /**
    * Is the User Feedback tab shown for this issue
    */

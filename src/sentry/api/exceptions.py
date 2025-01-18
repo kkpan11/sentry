@@ -7,7 +7,7 @@ from rest_framework.exceptions import APIException
 
 from sentry.app import env
 from sentry.models.organization import Organization
-from sentry.services.hybrid_cloud.organization.model import RpcOrganization
+from sentry.organizations.services.organization.model import RpcOrganization
 from sentry.utils.auth import construct_link_with_query
 from sentry.utils.http import is_using_customer_domain
 
@@ -36,22 +36,18 @@ class SentryAPIException(APIException):
         self.detail = {"detail": detail}
 
 
+class BadRequest(SentryAPIException):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "invalid-request"
+    message = "Invalid request"
+
+
 class ParameterValidationError(SentryAPIException):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "parameter-validation-error"
 
     def __init__(self, message: str, context: list[str] | None = None) -> None:
         super().__init__(message=message, context=".".join(context or []))
-
-
-class ProjectMoved(SentryAPIException):
-    status_code = status.HTTP_302_FOUND
-    # code/message currently don't get used
-    code = "resource-moved"
-    message = "Resource has been moved"
-
-    def __init__(self, new_url, slug):
-        super().__init__(url=new_url, slug=slug)
 
 
 class SsoRequired(SentryAPIException):
@@ -122,28 +118,19 @@ class EmailVerificationRequired(SentryAPIException):
         super().__init__(username=user.username)
 
 
+class PrimaryEmailVerificationRequired(SentryAPIException):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "primary-email-verification-required"
+    message = "Primary email verification required."
+
+    def __init__(self, user):
+        super().__init__(username=user.username)
+
+
 class TwoFactorRequired(SentryAPIException):
     status_code = status.HTTP_401_UNAUTHORIZED
     code = "2fa-required"
     message = "Organization requires two-factor authentication to be enabled"
-
-
-class AppConnectForbiddenError(SentryAPIException):
-    status_code = status.HTTP_403_FORBIDDEN
-    code = "app-connect-forbidden-error"
-    message = "App connect Forbidden error"
-
-
-class AppConnectAuthenticationError(SentryAPIException):
-    status_code = status.HTTP_401_UNAUTHORIZED
-    code = "app-connect-authentication-error"
-    message = "App connect authentication error"
-
-
-class AppConnectMultipleSourcesError(SentryAPIException):
-    status_code = status.HTTP_401_UNAUTHORIZED
-    code = "app-connect-multiple-sources-error"
-    message = "Only one Apple App Store Connect application is allowed in this project"
 
 
 class ConflictError(APIException):

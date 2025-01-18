@@ -4,16 +4,16 @@ from datetime import datetime, timedelta, timezone
 
 import sentry_sdk
 
-from sentry import features, quotas
+from sentry import quotas
+from sentry.constants import TARGET_SAMPLE_RATE_DEFAULT
 from sentry.db.models import Model
 from sentry.dynamic_sampling.rules.biases.base import Bias
 from sentry.dynamic_sampling.rules.combine import get_relay_biases_combinator
-from sentry.dynamic_sampling.rules.logging import log_rules
 from sentry.dynamic_sampling.rules.utils import PolymorphicRule, RuleType, get_enabled_user_biases
 from sentry.dynamic_sampling.tasks.helpers.boost_low_volume_projects import (
     get_boost_low_volume_projects_sample_rate,
 )
-from sentry.dynamic_sampling.tasks.helpers.sliding_window import get_sliding_window_sample_rate
+from sentry.dynamic_sampling.utils import has_custom_dynamic_sampling, is_project_mode_sampling
 from sentry.models.organization import Organization
 from sentry.models.project import Project
 
@@ -45,24 +45,21 @@ def is_recently_added(model: Model) -> bool:
     return False
 
 
-def is_sliding_window_enabled(organization: Organization) -> bool:
-    return not features.has(
-        "organizations:ds-sliding-window-org", organization, actor=None
-    ) and features.has("organizations:ds-sliding-window", organization, actor=None)
+def get_guarded_project_sample_rate(organization: Organization, project: Project) -> float:
+    # Early exit in project-mode, since we don't need to calculate the sample rate.
+    if is_project_mode_sampling(organization):
+        return float(project.get_option("sentry:target_sample_rate", TARGET_SAMPLE_RATE_DEFAULT))
 
+    if has_custom_dynamic_sampling(organization):
+        sample_rate = organization.get_option("sentry:target_sample_rate")
+    else:
+        sample_rate = quotas.backend.get_blended_sample_rate(
+            organization_id=organization.id, project=project
+        )
 
-def is_sliding_window_org_enabled(organization: Organization) -> bool:
-    return features.has(
-        "organizations:ds-sliding-window-org", organization, actor=None
-    ) and not features.has("organizations:ds-sliding-window", organization, actor=None)
-
-
-def get_guarded_blended_sample_rate(organization: Organization, project: Project) -> float:
-    sample_rate = quotas.backend.get_blended_sample_rate(organization_id=organization.id)
-
-    # If the sample rate is None, it means that dynamic sampling rules shouldn't be generated.
+    # get_blended_sample_rate returns None if the organization doesn't have dynamic sampling
     if sample_rate is None:
-        raise Exception("get_blended_sample_rate returns none")
+        sample_rate = TARGET_SAMPLE_RATE_DEFAULT
 
     # If the sample rate is 100%, we don't want to use any special dynamic sample rate, we will just sample at 100%.
     if sample_rate == 1.0:
@@ -75,20 +72,11 @@ def get_guarded_blended_sample_rate(organization: Organization, project: Project
     if is_recently_added(model=project) or is_recently_added(model=organization):
         return 1.0
 
-    # We want to use the normal sliding window only if the sliding window at the org level is disabled.
-    if is_sliding_window_enabled(organization):
-        # In case we use sliding window, we want to fall back to the original sample rate in case there was an error,
-        # whereas if we don't find a value in cache, we just sample at 100% under the assumption that the project
-        # has just been created.
-        sample_rate = get_sliding_window_sample_rate(
-            org_id=organization.id, project_id=project.id, error_sample_rate_fallback=sample_rate
-        )
-    else:
-        # In case we use the prioritise by project, we want to fall back to the original sample rate in case there are
-        # any issues.
-        sample_rate = get_boost_low_volume_projects_sample_rate(
-            org_id=organization.id, project_id=project.id, error_sample_rate_fallback=sample_rate
-        )
+    # When using the boosted project sample rate, we want to fall back to the blended sample rate in case there are
+    # any issues.
+    sample_rate, _ = get_boost_low_volume_projects_sample_rate(
+        org_id=organization.id, project_id=project.id, error_sample_rate_fallback=sample_rate
+    )
 
     return float(sample_rate)
 
@@ -114,8 +102,6 @@ def _get_rules_of_enabled_biases(
             except Exception:
                 logger.exception("Rule generator %s failed.", rule_type)
 
-    log_rules(project.organization.id, project.id, rules)
-
     return rules
 
 
@@ -125,7 +111,7 @@ def generate_rules(project: Project) -> list[PolymorphicRule]:
     try:
         rules = _get_rules_of_enabled_biases(
             project,
-            get_guarded_blended_sample_rate(organization, project),
+            get_guarded_project_sample_rate(organization, project),
             get_enabled_user_biases(project.get_option("sentry:dynamic_sampling_biases", None)),
             get_relay_biases_combinator(organization).get_combined_biases(),
         )

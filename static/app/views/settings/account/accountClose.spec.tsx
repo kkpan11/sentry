@@ -10,7 +10,7 @@ import {
 import AccountClose from 'sentry/views/settings/account/accountClose';
 
 describe('AccountClose', function () {
-  let deleteMock;
+  let deleteMock: jest.Mock;
   const soloOrgSlug = 'solo-owner';
   const nonSingleOwnerSlug = 'non-single-owner';
 
@@ -64,7 +64,7 @@ describe('AccountClose', function () {
 
     expect(
       screen.getByText(
-        'This is permanent and cannot be undone, are you really sure you want to do this?'
+        'WARNING! This is permanent and cannot be undone, are you really sure you want to do this?'
       )
     ).toBeInTheDocument();
     await userEvent.click(screen.getByText('Confirm'));

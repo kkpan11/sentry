@@ -7,13 +7,13 @@ import ProjectsStore from 'sentry/stores/projectsStore';
 import ProjectDetails from 'sentry/views/projectDetail/projectDetail';
 
 describe('ProjectDetail', function () {
-  const {routerContext, organization, project, router} = initializeOrg();
+  const {organization, project, router} = initializeOrg();
   const params = {...router.params, projectId: project.slug} as any;
 
   beforeEach(() => {
     PageFiltersStore.reset();
     ProjectsStore.reset();
-    // eslint-disable-next-line no-console
+
     jest.spyOn(console, 'error').mockImplementation(jest.fn());
 
     MockApiClient.addMockResponse({
@@ -61,7 +61,7 @@ describe('ProjectDetail', function () {
           route={{}}
         />,
         {
-          context: routerContext,
+          router,
           organization,
         }
       );
@@ -107,7 +107,7 @@ describe('ProjectDetail', function () {
           route={{}}
         />,
         {
-          context: routerContext,
+          router,
           organization,
         }
       );

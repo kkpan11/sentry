@@ -1,5 +1,3 @@
-import {Component} from 'react';
-import type {RouteContextInterface} from 'react-router';
 import {LocationFixture} from 'sentry-fixture/locationFixture';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 import {ProjectFixture} from 'sentry-fixture/project';
@@ -11,16 +9,16 @@ import {render, screen, waitFor} from 'sentry-test/reactTestingLibrary';
 
 import * as orgsActionCreators from 'sentry/actionCreators/organizations';
 import {openSudo} from 'sentry/actionCreators/sudoModal';
-import {SentryPropTypeValidators} from 'sentry/sentryPropTypeValidators';
 import ConfigStore from 'sentry/stores/configStore';
 import OrganizationStore from 'sentry/stores/organizationStore';
 import ProjectsStore from 'sentry/stores/projectsStore';
 import TeamStore from 'sentry/stores/teamStore';
-import type {Organization} from 'sentry/types';
+import type {RouteContextInterface} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
 import useOrganization from 'sentry/utils/useOrganization';
 
 import {OrganizationContextProvider, useEnsureOrganization} from './organizationContext';
-import {RouteContext} from './routeContext';
+import {TestRouteContext} from './routeContext';
 
 jest.mock('sentry/actionCreators/sudoModal');
 
@@ -93,19 +91,6 @@ describe('OrganizationContext', function () {
     return <div>{org?.slug ?? 'no-org'}</div>;
   }
 
-  /**
-   * Used to test the legacy organization context behavior
-   */
-  class OrganizationNameLegacyConsumer extends Component {
-    static contextTypes = {
-      organization: SentryPropTypeValidators.isOrganization,
-    };
-
-    render() {
-      return <div>{this.context.organization?.slug ?? 'no-org'}</div>;
-    }
-  }
-
   it('fetches org, projects, teams, and provides organization context', async function () {
     render(
       <OrganizationContextProvider>
@@ -118,17 +103,6 @@ describe('OrganizationContext', function () {
     expect(getOrgMock).toHaveBeenCalled();
     expect(getProjectsMock).toHaveBeenCalled();
     expect(getTeamsMock).toHaveBeenCalled();
-  });
-
-  it('provides legacy organization context', async function () {
-    render(
-      <OrganizationContextProvider>
-        <OrganizationLoaderStub />
-        <OrganizationNameLegacyConsumer />
-      </OrganizationContextProvider>
-    );
-
-    expect(await screen.findByText(organization.slug)).toBeInTheDocument();
   });
 
   it('does not fetch if organization is already set', async function () {
@@ -148,12 +122,12 @@ describe('OrganizationContext', function () {
   it('fetches new org when router params change', async function () {
     // First render with org-slug
     const {rerender} = render(
-      <RouteContext.Provider value={router}>
+      <TestRouteContext.Provider value={router}>
         <OrganizationContextProvider>
           <OrganizationLoaderStub />
           <OrganizationName />
         </OrganizationContextProvider>
-      </RouteContext.Provider>
+      </TestRouteContext.Provider>
     );
 
     expect(await screen.findByText(organization.slug)).toBeInTheDocument();
@@ -165,12 +139,12 @@ describe('OrganizationContext', function () {
 
     // re-render with another-org
     rerender(
-      <RouteContext.Provider value={{...router, params: {orgId: 'another-org'}}}>
+      <TestRouteContext.Provider value={{...router, params: {orgId: 'another-org'}}}>
         <OrganizationContextProvider>
           <OrganizationLoaderStub />
           <OrganizationName />
         </OrganizationContextProvider>
-      </RouteContext.Provider>
+      </TestRouteContext.Provider>
     );
 
     expect(await screen.findByText(anotherOrg.slug)).toBeInTheDocument();
@@ -178,6 +152,27 @@ describe('OrganizationContext', function () {
     expect(projectMock).toHaveBeenCalled();
     expect(teamMock).toHaveBeenCalled();
     expect(switchOrganization).toHaveBeenCalled();
+  });
+
+  it('opens sudo modal for superusers for nonmember org with active staff', async function () {
+    ConfigStore.set('user', UserFixture({isSuperuser: true, isStaff: true}));
+    organization.access = [];
+
+    getOrgMock = MockApiClient.addMockResponse({
+      url: `/organizations/${organization.slug}/`,
+      body: organization,
+    });
+
+    render(
+      <OrganizationContextProvider>
+        <OrganizationLoaderStub />
+        <OrganizationName />
+      </OrganizationContextProvider>
+    );
+
+    await waitFor(() => !OrganizationStore.getState().loading);
+
+    await waitFor(() => expect(openSudo).toHaveBeenCalled());
   });
 
   it('opens sudo modal for superusers on 403s', async function () {
@@ -198,7 +193,7 @@ describe('OrganizationContext', function () {
     await waitFor(() => !OrganizationStore.getState().loading);
 
     // eslint-disable-next-line no-console
-    expect(console.error).toHaveBeenCalled();
+    await waitFor(() => expect(console.error).toHaveBeenCalled());
     expect(openSudo).toHaveBeenCalled();
   });
 
@@ -214,12 +209,12 @@ describe('OrganizationContext', function () {
 
     // orgId is not present in the router.
     render(
-      <RouteContext.Provider value={{...router, params: {}}}>
+      <TestRouteContext.Provider value={{...router, params: {}}}>
         <OrganizationContextProvider>
           <OrganizationLoaderStub />
           <OrganizationName />
         </OrganizationContextProvider>
-      </RouteContext.Provider>
+      </TestRouteContext.Provider>
     );
 
     expect(await screen.findByText(configStoreOrg.slug)).toBeInTheDocument();

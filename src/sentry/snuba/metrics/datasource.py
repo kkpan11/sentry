@@ -1,9 +1,3 @@
-from __future__ import annotations
-
-import sentry_sdk
-
-from sentry.sentry_metrics.visibility import get_metrics_blocking_state
-
 """
 Module that gets both metadata and time series from Snuba.
 For metadata, it fetch metrics metadata (metric names, tag names, tag values, ...) from snuba.
@@ -12,13 +6,7 @@ until we have a proper metadata store set up. To keep things simple, and hopeful
 efficient, we only look at the past 24 hours.
 """
 
-__all__ = (
-    "get_metrics_meta",
-    "get_all_tags",
-    "get_tag_values",
-    "get_series",
-    "get_single_metric_info",
-)
+from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
@@ -27,8 +15,10 @@ from copy import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
 from operator import itemgetter
-from typing import Any, cast
+from typing import Any
 
+import sentry_sdk
+from rest_framework.exceptions import NotFound
 from snuba_sdk import Column, Condition, Function, Op, Query, Request
 from snuba_sdk.conditions import ConditionGroup
 
@@ -42,6 +32,7 @@ from sentry.sentry_metrics.utils import (
     bulk_reverse_resolve_tag_value,
     resolve_tag_key,
 )
+from sentry.sentry_metrics.visibility import get_metrics_blocking_state
 from sentry.snuba.dataset import Dataset, EntityKey
 from sentry.snuba.metrics.fields import run_metrics_query
 from sentry.snuba.metrics.fields.base import (
@@ -50,14 +41,8 @@ from sentry.snuba.metrics.fields.base import (
     org_id_from_projects,
 )
 from sentry.snuba.metrics.naming_layer.mapping import get_mri
-from sentry.snuba.metrics.naming_layer.mri import (
-    ParsedMRI,
-    get_available_operations,
-    is_custom_measurement,
-    is_mri,
-    parse_mri,
-)
-from sentry.snuba.metrics.query import Groupable, MetricField, MetricsQuery
+from sentry.snuba.metrics.naming_layer.mri import is_custom_measurement, is_mri, parse_mri
+from sentry.snuba.metrics.query import DeprecatingMetricsQuery, Groupable, MetricField
 from sentry.snuba.metrics.query_builder import (
     SnubaQueryBuilder,
     SnubaResultConverter,
@@ -69,14 +54,11 @@ from sentry.snuba.metrics.utils import (
     CUSTOM_MEASUREMENT_DATASETS,
     METRIC_TYPE_TO_ENTITY,
     UNALLOWED_TAGS,
-    BlockedMetric,
     DerivedMetricParseException,
     MetricDoesNotExistInIndexer,
     MetricMeta,
     MetricMetaWithTagKeys,
-    MetricOperationType,
     MetricType,
-    MetricUnit,
     NotSupportedOverCompositeEntityException,
     Tag,
     TagValue,
@@ -86,6 +68,14 @@ from sentry.snuba.metrics.utils import (
     to_intervals,
 )
 from sentry.utils.snuba import raw_snql_query
+
+__all__ = (
+    "get_all_tags",
+    "get_tag_values",
+    "get_series",
+    "get_single_metric_info",
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -102,28 +92,6 @@ def _get_metrics_for_entity(
         entity_key=entity_key,
         select=[Column("metric_id")],
         groupby=[Column("metric_id")],
-        where=[Condition(Column("use_case_id"), Op.EQ, use_case_id.value)],
-        referrer="snuba.metrics.get_metrics_names_for_entity",
-        project_ids=project_ids,
-        org_id=org_id,
-        use_case_id=use_case_id,
-        start=start,
-        end=end,
-    )
-
-
-def _get_metrics_by_project_for_entity(
-    entity_key: EntityKey,
-    project_ids: Sequence[int],
-    org_id: int,
-    use_case_id: UseCaseID,
-    start: datetime | None = None,
-    end: datetime | None = None,
-) -> list[SnubaDataType]:
-    return run_metrics_query(
-        entity_key=entity_key,
-        select=[Column("project_id"), Column("metric_id")],
-        groupby=[Column("project_id"), Column("metric_id")],
         where=[Condition(Column("use_case_id"), Op.EQ, use_case_id.value)],
         referrer="snuba.metrics.get_metrics_names_for_entity",
         project_ids=project_ids,
@@ -186,12 +154,8 @@ def get_available_derived_metrics(
 
 
 def get_metrics_blocking_state_of_projects(
-    projects: Sequence[Project], use_case_id: UseCaseID
+    projects: Sequence[Project],
 ) -> dict[str, Sequence[tuple[bool, Sequence[str], int]]]:
-    # Blocked metrics are only supported for custom metrics.
-    if use_case_id != UseCaseID.CUSTOM:
-        return {}
-
     metrics_blocking_state_by_project = get_metrics_blocking_state(projects)
     metrics_blocking_state_by_mri = {}
 
@@ -202,112 +166,6 @@ def get_metrics_blocking_state_of_projects(
             )
 
     return metrics_blocking_state_by_mri
-
-
-def _build_metric_meta(
-    parsed_mri: ParsedMRI, project_ids: Sequence[int], blocking_status: Sequence[BlockedMetric]
-) -> MetricMeta:
-    return MetricMeta(
-        type=parsed_mri.entity,
-        name=parsed_mri.name,
-        unit=cast(MetricUnit, parsed_mri.unit),
-        mri=parsed_mri.mri_string,
-        operations=cast(Sequence[MetricOperationType], get_available_operations(parsed_mri)),
-        projectIds=project_ids,
-        blockingStatus=blocking_status,
-    )
-
-
-def get_metrics_meta(
-    projects: Sequence[Project],
-    use_case_id: UseCaseID,
-    start: datetime | None = None,
-    end: datetime | None = None,
-) -> Sequence[MetricMeta]:
-    if not projects:
-        return []
-
-    stored_metrics = get_stored_metrics_of_projects(projects, use_case_id, start, end)
-    metrics_blocking_state = get_metrics_blocking_state_of_projects(projects, use_case_id)
-
-    metrics_metas = []
-    for metric_mri, project_ids in stored_metrics.items():
-        parsed_mri = parse_mri(metric_mri)
-        if parsed_mri is None:
-            with sentry_sdk.push_scope() as scope:
-                scope.set_extra("project_ids", project_ids)
-                scope.set_extra("metric_mri", metric_mri)
-                sentry_sdk.capture_message("Invalid metric MRI detected")
-
-            continue
-
-        blocking_status = []
-        if (metric_blocking := metrics_blocking_state.get(metric_mri)) is not None:
-            blocking_status = [
-                BlockedMetric(isBlocked=is_blocked, blockedTags=blocked_tags, projectId=project_id)
-                for is_blocked, blocked_tags, project_id in metric_blocking
-            ]
-            # We delete the metric so that in the next steps we can just merge the remaining blocked metrics that are
-            # not stored.
-            del metrics_blocking_state[metric_mri]
-
-        metrics_metas.append(_build_metric_meta(parsed_mri, project_ids, blocking_status))
-
-    for metric_mri, metric_blocking in metrics_blocking_state.items():
-        parsed_mri = parse_mri(metric_mri)
-        if parsed_mri is None:
-            continue
-
-        metrics_metas.append(
-            _build_metric_meta(
-                parsed_mri,
-                [],
-                [
-                    BlockedMetric(
-                        isBlocked=is_blocked, blockedTags=blocked_tags, projectId=project_id
-                    )
-                    for is_blocked, blocked_tags, project_id in metric_blocking
-                ],
-            )
-        )
-
-    return metrics_metas
-
-
-def get_stored_metrics_of_projects(
-    projects: Sequence[Project],
-    use_case_id: UseCaseID,
-    start: datetime | None = None,
-    end: datetime | None = None,
-) -> Mapping[str, Sequence[int]]:
-    org_id = projects[0].organization_id
-    project_ids = [project.id for project in projects]
-
-    stored_metrics = []
-    entity_keys = get_entity_keys_of_use_case_id(use_case_id=use_case_id)
-    for entity_key in entity_keys or ():
-        stored_metrics += _get_metrics_by_project_for_entity(
-            entity_key=entity_key,
-            project_ids=project_ids,
-            org_id=org_id,
-            use_case_id=use_case_id,
-            start=start,
-            end=end,
-        )
-
-    grouped_stored_metrics = {}
-    for stored_metric in stored_metrics:
-        grouped_stored_metrics.setdefault(stored_metric["metric_id"], []).append(
-            stored_metric["project_id"]
-        )
-
-    resolved_mris = bulk_reverse_resolve(
-        use_case_id, org_id, [metric_id for metric_id in grouped_stored_metrics.keys()]
-    )
-
-    return {
-        resolved_mris[metric_id]: projects for metric_id, projects in grouped_stored_metrics.items()
-    }
 
 
 def get_custom_measurements(
@@ -462,16 +320,11 @@ def _fetch_tags_or_values_for_mri(
     """
     org_id = projects[0].organization_id
 
-    try:
-        metric_ids = _get_metrics_filter_ids(
-            projects=projects, metric_mris=metric_mris, use_case_id=use_case_id
-        )
-    except MetricDoesNotExistInIndexer:
-        raise InvalidParams(
-            f"Some or all of the metric names in {metric_mris} do not exist in the indexer"
-        )
-    else:
-        where = [Condition(Column("metric_id"), Op.IN, list(metric_ids))] if metric_ids else []
+    metric_ids = _get_metrics_filter_ids(
+        projects=projects, metric_mris=metric_mris, use_case_id=use_case_id
+    )
+
+    where = [Condition(Column("metric_id"), Op.IN, list(metric_ids))] if metric_ids else []
 
     tag_or_value_ids_per_metric_id = defaultdict(list)
     # This dictionary is required as a mapping from an entity to the ids available in it to
@@ -515,7 +368,7 @@ def _fetch_tags_or_values_for_mri(
             error_str = f"The following metrics {metric_mris} do not exist in the dataset"
         else:
             error_str = "Dataset contains no metric data for your project selection"
-        raise InvalidParams(error_str)
+        raise NotFound(error_str)
 
     tag_or_value_id_lists = tag_or_value_ids_per_metric_id.values()
     tag_or_value_ids: set[int | str | None]
@@ -631,6 +484,15 @@ def get_all_tags(
             start=start,
             end=end,
         )
+        # Manually add the project key to enable grouping by project in the Metrics UI.
+        # There is a need to group metrics by project, cf. this PR:
+        # https://github.com/getsentry/sentry/commit/778000463605258a122be5de907513a8cc73f584
+        # The retrieval logic for tags will soon be changed, therefore this quick insertion should
+        # not live for long.
+        extended_tags = list(copy(tags))
+        extended_tags.append(Tag(key="project"))
+        tags = extended_tags
+
     except InvalidParams as e:
         sentry_sdk.capture_exception(e)
         return []
@@ -699,13 +561,15 @@ class GroupLimitFilters:
     """
 
     keys: tuple[Groupable]
-    aliased_keys: tuple[str]
-    values: list[tuple[int]]
+    aliased_keys: tuple[str, ...]
+    values: list[tuple[int, ...]]
     conditions: ConditionGroup
 
 
 def _get_group_limit_filters(
-    metrics_query: MetricsQuery, results: list[Mapping[str, int]], use_case_id: UseCaseID
+    metrics_query: DeprecatingMetricsQuery,
+    results: list[Mapping[str, int]],
+    use_case_id: UseCaseID,
 ) -> GroupLimitFilters | None:
     if not metrics_query.groupby or not results:
         return None
@@ -713,17 +577,17 @@ def _get_group_limit_filters(
     # Creates a mapping of groupBy fields to their equivalent SnQL
     key_to_condition_dict: dict[Groupable, Any] = {}
     for metric_groupby_obj in metrics_query.groupby:
-        key_to_condition_dict[
-            metric_groupby_obj.name
-        ] = SnubaQueryBuilder.generate_snql_for_action_by_fields(
-            metric_action_by_field=metric_groupby_obj,
-            use_case_id=use_case_id,
-            org_id=metrics_query.org_id,
-            projects=Project.objects.get_many_from_cache(metrics_query.project_ids),
-            is_column=True,
+        key_to_condition_dict[metric_groupby_obj.name] = (
+            SnubaQueryBuilder.generate_snql_for_action_by_fields(
+                metric_action_by_field=metric_groupby_obj,
+                use_case_id=use_case_id,
+                org_id=metrics_query.org_id,
+                projects=Project.objects.get_many_from_cache(metrics_query.project_ids),
+                is_column=True,
+            )
         )
 
-    aliased_group_keys: tuple[str] = tuple(
+    aliased_group_keys = tuple(
         metric_groupby_obj.alias
         for metric_groupby_obj in metrics_query.groupby
         if metric_groupby_obj.alias is not None
@@ -838,7 +702,7 @@ def _prune_extra_groups(results: dict, filters: GroupLimitFilters) -> None:
 
 def get_series(
     projects: Sequence[Project],
-    metrics_query: MetricsQuery,
+    metrics_query: DeprecatingMetricsQuery,
     use_case_id: UseCaseID,
     include_meta: bool = False,
     tenant_ids: dict[str, Any] | None = None,
@@ -1086,11 +950,13 @@ def get_series(
         "end": metrics_query.end,
         "intervals": intervals,
         "groups": result_groups,
-        "meta": translate_meta_results(
-            meta=meta,
-            alias_to_metric_field=converter._alias_to_metric_field,
-            alias_to_metric_group_by_field=groupby_aliases,
-        )
-        if include_meta
-        else [],
+        "meta": (
+            translate_meta_results(
+                meta=meta,
+                alias_to_metric_field=converter._alias_to_metric_field,
+                alias_to_metric_group_by_field=groupby_aliases,
+            )
+            if include_meta
+            else []
+        ),
     }

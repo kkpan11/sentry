@@ -1,16 +1,19 @@
 from time import time
 from typing import Any
+from unittest.mock import patch
 
+import orjson
 import responses
 from requests.exceptions import ConnectionError
 
+from fixtures.bitbucket_server import EXAMPLE_PRIVATE_KEY
 from sentry.integrations.bitbucket_server.webhook import PROVIDER_NAME
-from sentry.models.identity import Identity
 from sentry.models.repository import Repository
-from sentry.silo import SiloMode
+from sentry.silo.base import SiloMode
+from sentry.testutils.asserts import assert_failure_metric, assert_success_metric
 from sentry.testutils.cases import APITestCase
-from sentry.testutils.silo import assume_test_silo_mode, region_silo_test
-from sentry.utils import json
+from sentry.testutils.silo import assume_test_silo_mode
+from sentry.users.models.identity import Identity
 from sentry_plugins.bitbucket.testutils import REFS_CHANGED_EXAMPLE
 
 PROVIDER = "bitbucket_server"
@@ -44,7 +47,13 @@ class WebhookTestBase(APITestCase):
                 idp=self.create_identity_provider(type=PROVIDER),
                 user=self.user,
                 external_id="user_identity",
-                data={"access_token": "vsts-access-token", "expires": time() + 50000},
+                data={
+                    "access_token": "bitbucket-access-token",
+                    "access_token_secret": "access-token-secret",
+                    "consumer_key": "bitbucket-app",
+                    "private_key": EXAMPLE_PRIVATE_KEY,
+                    "expires": time() + 50000,
+                },
             )
 
     def create_repository(self, **kwargs: Any) -> Repository:
@@ -70,13 +79,11 @@ class WebhookTestBase(APITestCase):
         )
 
 
-@region_silo_test
 class WebhookGetTest(WebhookTestBase):
     def test_get_request_fails(self):
         self.get_error_response(self.organization.id, self.integration.id, status_code=405)
 
 
-@region_silo_test
 class WebhookPostTest(WebhookTestBase):
     method = "post"
 
@@ -99,7 +106,6 @@ class WebhookPostTest(WebhookTestBase):
         )
 
 
-@region_silo_test
 class RefsChangedWebhookTest(WebhookTestBase):
     method = "post"
 
@@ -113,12 +119,36 @@ class RefsChangedWebhookTest(WebhookTestBase):
             status_code=404,
         )
 
-    def test_simple(self):
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_simple(self, mock_record):
         with assume_test_silo_mode(SiloMode.CONTROL):
             self.integration.add_organization(self.organization, default_auth_id=self.identity.id)
 
         self.create_repository()
         self.send_webhook()
+
+        assert_success_metric(mock_record)
+
+    @patch("sentry.integrations.bitbucket_server.webhook.PushEventWebhook.__call__")
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_webhook_error_metric(self, mock_record, mock_event):
+        with assume_test_silo_mode(SiloMode.CONTROL):
+            self.integration.add_organization(self.organization, default_auth_id=self.identity.id)
+
+        self.create_repository()
+
+        error = Exception("error")
+        mock_event.side_effect = error
+
+        self.get_error_response(
+            self.organization.id,
+            self.integration.id,
+            raw_data=REFS_CHANGED_EXAMPLE,
+            extra_headers=dict(HTTP_X_EVENT_KEY="repo:refs_changed"),
+            status_code=500,
+        )
+
+        assert_failure_metric(mock_record, error)
 
     @responses.activate
     def test_get_commits_error(self):
@@ -158,7 +188,7 @@ class RefsChangedWebhookTest(WebhookTestBase):
         self.get_error_response(
             self.organization.id,
             self.integration.id,
-            raw_data=json.dumps(payload),
+            raw_data=orjson.dumps(payload),
             extra_headers=dict(HTTP_X_EVENT_KEY="repo:refs_changed"),
             status_code=400,
         )
@@ -200,7 +230,7 @@ class RefsChangedWebhookTest(WebhookTestBase):
         self.get_error_response(
             self.organization.id,
             self.integration.id,
-            raw_data=json.dumps(payload),
+            raw_data=orjson.dumps(payload),
             extra_headers=dict(HTTP_X_EVENT_KEY="repo:refs_changed"),
-            status_code=409,
+            status_code=400,
         )

@@ -6,7 +6,7 @@ import {
   addLoadingMessage,
   addSuccessMessage,
 } from 'sentry/actionCreators/indicator';
-import Badge from 'sentry/components/badge';
+import Badge from 'sentry/components/badge/badge';
 import {Button} from 'sentry/components/button';
 import ButtonBar from 'sentry/components/buttonBar';
 import Card from 'sentry/components/card';
@@ -20,12 +20,12 @@ import {IconEllipsis, IconMail} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import PluginIcon from 'sentry/plugins/components/pluginIcon';
 import {space} from 'sentry/styles/space';
-import type {Project} from 'sentry/types';
 import type {
   AvailableNotificationAction,
   NotificationAction,
 } from 'sentry/types/notificationActions';
 import {NotificationActionService} from 'sentry/types/notificationActions';
+import type {Project} from 'sentry/types/project';
 import useApi from 'sentry/utils/useApi';
 import useOrganization from 'sentry/utils/useOrganization';
 
@@ -175,7 +175,9 @@ function NotificationActionItem({
 
     // Remove keys from the data if they are falsy
     Object.keys(data).forEach(key => {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       if (!data[key]) {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         delete data[key];
       }
     });
@@ -199,6 +201,7 @@ function NotificationActionItem({
     const updatedAction = {...editedAction};
     names.forEach((name, i) => {
       const value = values[i];
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       updatedAction[name] = value;
     });
     setEditedAction(updatedAction);
@@ -379,7 +382,7 @@ export const NotificationActionFormContainer = styled('div')`
 
 const NotificationRecipient = styled(Badge)`
   border-radius: ${p => p.theme.borderRadius};
-  font-weight: normal;
+  font-weight: ${p => p.theme.fontWeightNormal};
 `;
 
 export default NotificationActionItem;

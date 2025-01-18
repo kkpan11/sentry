@@ -29,7 +29,7 @@ class SafeRenderer extends marked.Renderer {
       return href;
     }
 
-    const out = `<a href="${href}"${title ? ` title="${title}"` : ''}>${text}</a>`;
+    const out = super.link(href, title, text);
     return dompurify.sanitize(out);
   }
 
@@ -39,7 +39,17 @@ class SafeRenderer extends marked.Renderer {
       return '';
     }
 
-    return `<img src="${href}" alt="${text}"${title ? ` title="${title}"` : ''} />`;
+    return super.image(href, title, text);
+  }
+}
+
+class LimitedRenderer extends marked.Renderer {
+  link(href: string) {
+    return href;
+  }
+
+  image(href: string) {
+    return href;
   }
 }
 
@@ -59,11 +69,12 @@ marked.setOptions({
     }
 
     if (lang in Prism.languages) {
-      return Prism.highlight(code, Prism.languages[lang], lang);
+      return Prism.highlight(code, Prism.languages[lang]!, lang);
     }
 
     loadPrismLanguage(lang, {
-      onLoad: () => callback?.(null!, Prism.highlight(code, Prism.languages[lang], lang)),
+      onLoad: () =>
+        callback?.(null!, Prism.highlight(code, Prism.languages[lang]!, lang)),
       onError: error => callback?.(error, code),
       suppressExistenceWarning: true,
     });
@@ -81,6 +92,9 @@ marked.setOptions({
   silent: NODE_ENV === 'test',
 });
 
+const limitedMarked = (text: string, options: MarkedOptions = {}) =>
+  sanitizedMarked(text, {...options, renderer: new LimitedRenderer()});
+
 const sanitizedMarked = (src: string, options?: MarkedOptions) => {
   return dompurify.sanitize(marked(src, options));
 };
@@ -88,5 +102,5 @@ const sanitizedMarked = (src: string, options?: MarkedOptions) => {
 const singleLineRenderer = (text: string, options: MarkedOptions = {}) =>
   sanitizedMarked(text, {...options, renderer: new NoParagraphRenderer()});
 
-export {singleLineRenderer};
+export {singleLineRenderer, limitedMarked};
 export default sanitizedMarked;

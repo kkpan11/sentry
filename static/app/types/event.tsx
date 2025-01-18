@@ -1,15 +1,18 @@
+import type {CloudResourceContext} from '@sentry/core';
+
+import type {CultureContext} from 'sentry/components/events/contexts/knownContext/culture';
+import type {MissingInstrumentationContext} from 'sentry/components/events/contexts/knownContext/missingInstrumentation';
 import type {
   AggregateSpanType,
-  MetricsSummary,
   RawSpanType,
   TraceContextType,
 } from 'sentry/components/events/interfaces/spans/types';
 import type {SymbolicatorStatus} from 'sentry/components/events/interfaces/types';
-import type {IssueType, PlatformKey} from 'sentry/types';
 
 import type {RawCrumb} from './breadcrumbs';
 import type {Image} from './debugImage';
-import type {IssueAttachment, IssueCategory} from './group';
+import type {IssueAttachment, IssueCategory, IssueType} from './group';
+import type {PlatformKey} from './project';
 import type {Release} from './release';
 import type {RawStacktrace, StackTraceMechanism, StacktraceType} from './stacktrace';
 
@@ -55,7 +58,7 @@ type EventGroupVariantKey =
   | 'default'
   | 'system';
 
-export enum EventGroupVariantType {
+export const enum EventGroupVariantType {
   CHECKSUM = 'checksum',
   FALLBACK = 'fallback',
   CUSTOM_FINGERPRINT = 'custom-fingerprint',
@@ -198,8 +201,6 @@ export type Frame = {
   trust: any | null;
   vars: Record<string, any> | null;
   addrMode?: string;
-  isPrefix?: boolean;
-  isSentinel?: boolean;
   lock?: Lock | null;
   // map exists if the frame has a source map
   map?: string | null;
@@ -211,8 +212,6 @@ export type Frame = {
 };
 
 export enum FrameBadge {
-  SENTINEL = 'sentinel',
-  PREFIX = 'prefix',
   GROUPING = 'grouping',
 }
 
@@ -233,29 +232,11 @@ export type ExceptionType = {
   values?: Array<ExceptionValue>;
 };
 
-export type TreeLabelPart =
-  | string
-  | {
-      classbase?: string;
-      datapath?: (string | number)[];
-      filebase?: string;
-      function?: string;
-      is_prefix?: boolean;
-      // is_sentinel is no longer being used,
-      // but we will still assess whether we will use this property in the near future.
-      is_sentinel?: boolean;
-      package?: string;
-      type?: string;
-    };
-
 // This type is incomplete
 export type EventMetadata = {
   current_level?: number;
-  current_tree_label?: TreeLabelPart[];
   directive?: string;
-  display_title_with_tree_label?: boolean;
   filename?: string;
-  finest_tree_label?: TreeLabelPart[];
   function?: string;
   message?: string;
   origin?: string;
@@ -354,17 +335,17 @@ export interface EntryRequestDataDefault {
   apiTarget: null;
   method: string;
   url: string;
-  cookies?: [key: string, value: string][];
+  cookies?: Array<[key: string, value: string] | null>;
   data?: string | null | Record<string, any> | [key: string, value: any][];
   env?: Record<string, string>;
   fragment?: string | null;
-  headers?: [key: string, value: string][];
+  headers?: Array<[key: string, value: string] | null>;
   inferredContentType?:
     | null
     | 'application/json'
     | 'application/x-www-form-urlencoded'
     | 'multipart/form-data';
-  query?: [key: string, value: string][] | string;
+  query?: Array<[key: string, value: string] | null> | string;
 }
 
 export interface EntryRequestDataGraphQl
@@ -426,6 +407,7 @@ export enum DeviceContextKey {
   ARCH = 'arch',
   BATTERY_LEVEL = 'battery_level',
   BATTERY_STATUS = 'battery_status',
+  BATTERY_TEMPERATURE = 'battery_temperature',
   BOOT_TIME = 'boot_time',
   BRAND = 'brand',
   CHARGING = 'charging',
@@ -472,6 +454,7 @@ export interface DeviceContext
   [DeviceContextKey.ARCH]?: string;
   [DeviceContextKey.BATTERY_LEVEL]?: number;
   [DeviceContextKey.BATTERY_STATUS]?: string;
+  [DeviceContextKey.BATTERY_TEMPERATURE]?: number;
   [DeviceContextKey.BOOT_TIME]?: string;
   [DeviceContextKey.BRAND]?: string;
   [DeviceContextKey.CHARGING]?: boolean;
@@ -630,16 +613,26 @@ export interface ThreadPoolInfoContext {
   [ThreadPoolInfoContextKey.AVAILABLE_COMPLETION_PORT_THREADS]: number;
 }
 
+export type MetricAlertContextType = {
+  alert_rule_id?: string;
+};
+
 export enum ProfileContextKey {
   PROFILE_ID = 'profile_id',
+  PROFILER_ID = 'profiler_id',
 }
 
 export interface ProfileContext {
   [ProfileContextKey.PROFILE_ID]?: string;
+  [ProfileContextKey.PROFILER_ID]?: string;
+}
+
+export enum ReplayContextKey {
+  REPLAY_ID = 'replay_id',
 }
 
 export interface ReplayContext {
-  replay_id: string;
+  [ReplayContextKey.REPLAY_ID]: string;
   type: string;
 }
 export interface BrowserContext {
@@ -652,14 +645,24 @@ export interface ResponseContext {
   type: 'response';
 }
 
-type EventContexts = {
+// event.contexts.flags can be overriden by the user so the type is not strict
+export type FeatureFlag = {flag?: string; result?: boolean};
+export type Flags = {values?: FeatureFlag[]};
+
+export type EventContexts = {
+  'Current Culture'?: CultureContext;
   'Memory Info'?: MemoryInfoContext;
   'ThreadPool Info'?: ThreadPoolInfoContext;
   browser?: BrowserContext;
   client_os?: OSContext;
+  cloud_resource?: CloudResourceContext;
+  culture?: CultureContext;
   device?: DeviceContext;
   feedback?: Record<string, any>;
+  flags?: Flags;
   memory_info?: MemoryInfoContext;
+  metric_alert?: MetricAlertContextType;
+  missing_instrumentation?: MissingInstrumentationContext;
   os?: OSContext;
   otel?: OtelContext;
   // TODO (udameli): add better types here
@@ -674,7 +677,7 @@ type EventContexts = {
   unity?: UnityContext;
 };
 
-export type Measurement = {value: number; unit?: string};
+export type Measurement = {value: number; type?: string; unit?: string};
 
 export type EventTag = {key: string; value: string};
 
@@ -816,7 +819,6 @@ export interface EventTransaction
   )[];
   startTimestamp: number;
   type: EventOrGroupType.TRANSACTION;
-  _metrics_summary?: MetricsSummary;
   perfProblem?: PerformanceDetectorData;
 }
 

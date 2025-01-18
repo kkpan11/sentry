@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, TypedDict, Union, cast
 from urllib.parse import parse_qs, urlparse
 
 from django.db.models import Count
@@ -14,10 +14,11 @@ from django.utils.http import urlencode
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
-from sentry import integrations
 from sentry.eventstore.models import Event, GroupEvent
-from sentry.incidents.models import AlertRuleTriggerAction
-from sentry.integrations import IntegrationFeatures, IntegrationProvider
+from sentry.incidents.models.alert_rule import AlertRuleTriggerAction
+from sentry.integrations.base import IntegrationFeatures, IntegrationProvider
+from sentry.integrations.manager import default_manager as integrations
+from sentry.integrations.services.integration import integration_service
 from sentry.issues.grouptype import (
     PerformanceConsecutiveDBQueriesGroupType,
     PerformanceNPlusOneAPICallsGroupType,
@@ -27,7 +28,6 @@ from sentry.models.activity import Activity
 from sentry.models.commit import Commit
 from sentry.models.deploy import Deploy
 from sentry.models.environment import Environment
-from sentry.models.eventerror import EventError
 from sentry.models.group import Group
 from sentry.models.grouplink import GroupLink
 from sentry.models.organization import Organization
@@ -36,9 +36,8 @@ from sentry.models.release import Release
 from sentry.models.releasecommit import ReleaseCommit
 from sentry.models.repository import Repository
 from sentry.models.rule import Rule
-from sentry.services.hybrid_cloud.integration import integration_service
-from sentry.services.hybrid_cloud.user import RpcUser
-from sentry.services.hybrid_cloud.util import region_silo_function
+from sentry.silo.base import region_silo_function
+from sentry.users.services.user import RpcUser
 from sentry.utils.committers import get_serialized_event_file_committers
 from sentry.utils.performance_issues.base import get_url_from_span
 from sentry.utils.performance_issues.performance_problem import PerformanceProblem
@@ -68,9 +67,7 @@ def get_release(activity: Activity, organization: Organization) -> Release | Non
         return None
 
 
-def get_group_counts_by_project(
-    release: Release, projects: Iterable[Project]
-) -> Mapping[Project, int]:
+def get_group_counts_by_project(release: Release, projects: Iterable[Project]) -> dict[int, int]:
     return dict(
         Group.objects.filter(
             project__in=projects,
@@ -87,12 +84,17 @@ def get_group_counts_by_project(
     )
 
 
+class _RepoCommitsDict(TypedDict):
+    name: str
+    commits: list[tuple[Commit, RpcUser | None]]
+
+
 def get_repos(
     commits: Iterable[Commit],
     users_by_email: Mapping[str, RpcUser],
     organization: Organization,
-) -> Iterable[Mapping[str, str | Iterable[tuple[Commit, RpcUser | None]]]]:
-    repositories_by_id = {
+) -> list[_RepoCommitsDict]:
+    repositories_by_id: dict[int, _RepoCommitsDict] = {
         repository_id: {"name": repository_name, "commits": []}
         for repository_id, repository_name in Repository.objects.filter(
             organization_id=organization.id,
@@ -102,7 +104,7 @@ def get_repos(
     # These commits are in order so they should end up in the list of commits still in order.
     for commit in commits:
         # Get the user object if it exists
-        user_option = users_by_email.get(commit.author.email) if commit.author_id else None
+        user_option = users_by_email.get(commit.author.email) if commit.author is not None else None
         repositories_by_id[commit.repository_id]["commits"].append((commit, user_option))
 
     return list(repositories_by_id.values())
@@ -114,24 +116,6 @@ def get_environment_for_deploy(deploy: Deploy | None) -> str:
         if environment and environment.name:
             return str(environment.name)
     return "Default Environment"
-
-
-def summarize_issues(
-    issues: Iterable[Mapping[str, Mapping[str, Any]]]
-) -> Iterable[Mapping[str, str]]:
-    rv = []
-    for issue in issues:
-        extra_info = None
-        msg_d = dict(issue["data"])
-        msg_d["type"] = issue["type"]
-
-        if "image_path" in issue["data"]:
-            extra_info = issue["data"]["image_path"].rsplit("/", 1)[-1]
-            if "image_arch" in issue["data"]:
-                extra_info = "{} ({})".format(extra_info, issue["data"]["image_arch"])
-
-        rv.append({"message": EventError(msg_d).message, "extra_info": extra_info})
-    return rv
 
 
 def get_email_link_extra_params(
@@ -272,10 +256,7 @@ def has_integrations(organization: Organization, project: Project) -> bool:
 
 
 def is_alert_rule_integration(provider: IntegrationProvider) -> bool:
-    return any(
-        feature == (IntegrationFeatures.ALERT_RULE or IntegrationFeatures.ENTERPRISE_ALERT_RULE)
-        for feature in provider.features
-    )
+    return IntegrationFeatures.ALERT_RULE in provider.features
 
 
 def has_alert_integration(project: Project) -> bool:
@@ -458,9 +439,9 @@ class PerformanceProblemContext:
             "transaction_name": self.transaction,
             "parent_span": get_span_evidence_value(self.parent_span),
             "repeating_spans": get_span_evidence_value(self.repeating_spans),
-            "num_repeating_spans": str(len(self.problem.offender_span_ids))
-            if self.problem.offender_span_ids
-            else "",
+            "num_repeating_spans": (
+                str(len(self.problem.offender_span_ids)) if self.problem.offender_span_ids else ""
+            ),
         }
 
     @property
@@ -531,9 +512,9 @@ class NPlusOneAPICallProblemContext(PerformanceProblemContext):
             "transaction_name": self.transaction,
             "repeating_spans": self.path_prefix,
             "parameters": self.parameters,
-            "num_repeating_spans": str(len(self.problem.offender_span_ids))
-            if self.problem.offender_span_ids
-            else "",
+            "num_repeating_spans": (
+                str(len(self.problem.offender_span_ids)) if self.problem.offender_span_ids else ""
+            ),
         }
 
     @property

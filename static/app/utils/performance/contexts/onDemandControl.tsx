@@ -1,12 +1,12 @@
 import type {ReactNode} from 'react';
 import {useCallback, useState} from 'react';
-import {browserHistory} from 'react-router';
 import type {Location} from 'history';
 
 import SwitchButton from 'sentry/components/switchButton';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import {FlexContainer} from 'sentry/utils/discover/styles';
 import {isOnDemandQueryString} from 'sentry/utils/onDemandMetrics';
 import {hasOnDemandMetricWidgetFeature} from 'sentry/utils/onDemandMetrics/features';
@@ -74,8 +74,13 @@ export function OnDemandControlProvider({
  * 2. contains one of the keys that are not supported by standard metrics or conditions that
  *    can't be on-demand because they are part of errors. (eg. error.type, message, stack, etc.)
  */
-export function _isOnDemandMetricWidget(widget: Widget): boolean {
-  if (widget.widgetType !== WidgetType.DISCOVER) {
+export function isOnDemandMetricWidget(widget: Widget): boolean {
+  if (
+    !(
+      widget.widgetType === WidgetType.DISCOVER ||
+      widget.widgetType === WidgetType.TRANSACTIONS
+    )
+  ) {
     return false;
   }
 
@@ -93,6 +98,18 @@ export function _isOnDemandMetricWidget(widget: Widget): boolean {
   return true;
 }
 
+/**
+ * On-demand doesn't include 'release'
+ */
+const doesWidgetHaveReleaseConditions = (widget: Widget) =>
+  widget.queries.some(q => q.conditions.includes('release:'));
+
+/**
+ * Check the extraction state for any widgets exceeding spec limit / cardinality limit etc.
+ */
+const doesWidgetHaveDisabledOnDemand = (widget: Widget) =>
+  widget.queries.some(q => q.onDemand?.some(d => !d.enabled));
+
 export const shouldUseOnDemandMetrics = (
   organization: Organization,
   widget: Widget,
@@ -106,7 +123,15 @@ export const shouldUseOnDemandMetrics = (
     return onDemandControlContext.forceOnDemand;
   }
 
-  return _isOnDemandMetricWidget(widget);
+  if (doesWidgetHaveReleaseConditions(widget)) {
+    return false;
+  }
+
+  if (doesWidgetHaveDisabledOnDemand(widget)) {
+    return false;
+  }
+
+  return isOnDemandMetricWidget(widget);
 };
 
 export function ToggleOnDemand() {

@@ -41,7 +41,7 @@ function OnCallServiceForm({
 }: OnCallServiceFormProps) {
   const [selectedAccount, setSelectedAccount] = useState(
     action.integrationId
-      ? Integrations[action.integrationId][0].action.integrationName
+      ? Integrations[action.integrationId]![0]!.action.integrationName
       : ''
   );
   const [selectedDisplay, setSelectedDisplay] = useState(action.targetDisplay ?? '');
@@ -50,13 +50,14 @@ function OnCallServiceForm({
     return Object.keys(Integrations).map<MenuItemProps>(integrationId => {
       // Get the name of the integration for the integrationId from the first
       // AvailableNotificationAction element in the array
+      // @ts-ignore TS(7015): Element implicitly has an 'any' type because index... Remove this comment to see the full error message
       const integrationName = Integrations[integrationId][0].action.integrationName;
       return {
         key: integrationName,
         label: integrationName,
-        onAction: value => {
+        onAction: () => {
           onChange(['integrationId'], [integrationId]);
-          setSelectedAccount(value);
+          setSelectedAccount(integrationName);
         },
       };
     });
@@ -67,16 +68,17 @@ function OnCallServiceForm({
     if (!action.integrationId) {
       return [];
     }
-    const services = Integrations[action.integrationId];
+    const services = Integrations[action.integrationId]!;
     return services.map<MenuItemProps>(service => ({
       key: service.action.targetDisplay ?? '',
       label: service.action.targetDisplay,
-      onAction: value => {
+      onAction: () => {
+        const display = service.action.targetDisplay ?? '';
         onChange(
           ['targetIdentifier', 'targetDisplay'],
-          [service.action.targetIdentifier, value]
+          [service.action.targetIdentifier, display]
         );
-        setSelectedDisplay(value);
+        setSelectedDisplay(display);
       },
     }));
   };

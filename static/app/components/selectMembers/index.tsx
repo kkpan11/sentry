@@ -8,7 +8,8 @@ import IdBadge from 'sentry/components/idBadge';
 import {Tooltip} from 'sentry/components/tooltip';
 import {t} from 'sentry/locale';
 import MemberListStore from 'sentry/stores/memberListStore';
-import type {Member, Organization, Project, User} from 'sentry/types';
+import type {Member, Organization} from 'sentry/types/organization';
+import type {User} from 'sentry/types/user';
 import withApi from 'sentry/utils/withApi';
 
 const getSearchKeyForUser = (user: User) =>
@@ -34,7 +35,6 @@ type Props = {
   disabled?: boolean;
   onInputChange?: (value: any) => any;
   placeholder?: string;
-  project?: Project;
   styles?: {control?: (provided: any) => any};
 };
 
@@ -78,7 +78,7 @@ class SelectMembers extends Component<Props, State> {
   ];
 
   renderUserBadge = (user: User) => (
-    <IdBadge avatarSize={24} user={user} hideEmail useLink={false} />
+    <IdBadge avatarSize={24} user={user} hideEmail disableLink />
   );
 
   createMentionableUser = (user: User): MentionableUser => ({
@@ -92,7 +92,7 @@ class SelectMembers extends Component<Props, State> {
     },
   });
 
-  createUnmentionableUser = ({user}) => ({
+  createUnmentionableUser = ({user}: any) => ({
     ...this.createMentionableUser(user),
     disabled: true,
     label: (
@@ -111,11 +111,11 @@ class SelectMembers extends Component<Props, State> {
     return MemberListStore.getAll().map(this.createMentionableUser);
   }
 
-  handleChange = newValue => {
+  handleChange = (newValue: any) => {
     this.props.onChange(newValue);
   };
 
-  handleInputChange = inputValue => {
+  handleInputChange = (inputValue: any) => {
     this.setState({inputValue});
 
     if (this.props.onInputChange) {
@@ -148,7 +148,7 @@ class SelectMembers extends Component<Props, State> {
 
     // Return a promise for `react-select`
     return new Promise((resolve, reject) => {
-      this.queryMembers(this.state.inputValue, (err, result) => {
+      this.queryMembers(this.state.inputValue, (err: any, result: any) => {
         if (err) {
           reject(err);
         } else {
@@ -199,8 +199,10 @@ class SelectMembers extends Component<Props, State> {
         value={this.state.options?.find(({value}) => value === this.props.value)}
         styles={{
           ...(styles ?? {}),
+          // @ts-ignore TS(7006): Parameter 'provided' implicitly has an 'any' type.
           option: (provided, state: any) => ({
             ...provided,
+
             svg: {
               color: state.isSelected && state.theme.white,
             },

@@ -1,29 +1,28 @@
+import styled from '@emotion/styled';
+
 import Alert from 'sentry/components/alert';
 import ExternalLink from 'sentry/components/links/externalLink';
 import {IconInfo} from 'sentry/icons';
 import {t, tct} from 'sentry/locale';
 
 interface Props {
-  primaryAction: 'create' | 'setup';
   projectSlug: string;
 }
 
-export default function ReplayUnsupportedAlert({primaryAction, projectSlug}: Props) {
-  const link = (
-    <ExternalLink href="https://docs.sentry.io/platforms/javascript/session-replay/" />
+export default function ReplayUnsupportedAlert({projectSlug}: Props) {
+  const docsLink = (
+    <ExternalLink href="https://docs.sentry.io/product/session-replay/getting-started/#supported-sdks" />
   );
   return (
-    <Alert icon={<IconInfo />}>
+    <StyledAlert icon={<IconInfo />}>
       <strong>{t(`Session Replay isn't available for %s.`, projectSlug)}</strong>{' '}
-      {primaryAction === 'create'
-        ? tct(
-            `Create a project using our [link:Sentry browser SDK package], or equivalent framework SDK.`,
-            {link}
-          )
-        : tct(
-            `Select a project using our [link:Sentry browser SDK package], or equivalent framework SDK.`,
-            {link}
-          )}
-    </Alert>
+      {tct(`[docsLink: See our docs] to find out which platforms are supported.`, {
+        docsLink,
+      })}
+    </StyledAlert>
   );
 }
+
+const StyledAlert = styled(Alert)`
+  margin: 0;
+`;

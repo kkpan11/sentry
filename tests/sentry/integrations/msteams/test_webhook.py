@@ -8,12 +8,14 @@ import responses
 from django.test import override_settings
 from django.urls import reverse
 
+from sentry.integrations.models.integration import Integration
 from sentry.integrations.msteams.utils import ACTION_TYPE
-from sentry.models.identity import Identity
-from sentry.models.integrations.integration import Integration
-from sentry.silo import SiloMode
+from sentry.integrations.types import EventLifecycleOutcome
+from sentry.silo.base import SiloMode
+from sentry.testutils.asserts import assert_slo_metric
 from sentry.testutils.cases import APITestCase
-from sentry.testutils.silo import assume_test_silo_mode, region_silo_test
+from sentry.testutils.silo import assume_test_silo_mode
+from sentry.users.models.identity import Identity
 from sentry.utils import jwt
 
 from .test_helpers import (
@@ -34,7 +36,6 @@ team_id = "19:8d46058cda57449380517cc374727f2a@thread.tacv2"
 kid = "Su-pdZys9LJGhDVgah3UjfPouuc"
 
 
-@region_silo_test
 class MsTeamsWebhookTest(APITestCase):
     @pytest.fixture(autouse=True)
     def _setup_metric_patch(self):
@@ -366,9 +367,10 @@ class MsTeamsWebhookTest(APITestCase):
         assert len(responses.calls) == 2
 
     @responses.activate
+    @mock.patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
     @mock.patch("sentry.utils.jwt.decode")
     @mock.patch("time.time")
-    def test_unlink_user(self, mock_time, mock_decode):
+    def test_unlink_user(self, mock_time, mock_decode, mock_record):
         access_json = {"expires_in": 86399, "access_token": "my_token"}
         responses.add(
             responses.POST,
@@ -396,10 +398,13 @@ class MsTeamsWebhookTest(APITestCase):
         )
         assert "Bearer my_token" in responses.calls[3].request.headers["Authorization"]
 
+        assert_slo_metric(mock_record, EventLifecycleOutcome.SUCCESS)
+
     @responses.activate
+    @mock.patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
     @mock.patch("sentry.utils.jwt.decode")
     @mock.patch("time.time")
-    def test_help_command(self, mock_time, mock_decode):
+    def test_help_command(self, mock_time, mock_decode, mock_record):
         other_command = deepcopy(EXAMPLE_UNLINK_COMMAND)
         other_command["text"] = "Help"
         access_json = {"expires_in": 86399, "access_token": "my_token"}
@@ -429,10 +434,13 @@ class MsTeamsWebhookTest(APITestCase):
         ].request.body.decode("utf-8")
         assert "Bearer my_token" in responses.calls[3].request.headers["Authorization"]
 
+        assert_slo_metric(mock_record, EventLifecycleOutcome.SUCCESS)
+
     @responses.activate
+    @mock.patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
     @mock.patch("sentry.utils.jwt.decode")
     @mock.patch("time.time")
-    def test_link_command(self, mock_time, mock_decode):
+    def test_link_command(self, mock_time, mock_decode, mock_record):
         other_command = deepcopy(EXAMPLE_UNLINK_COMMAND)
         other_command["text"] = "link"
         access_json = {"expires_in": 86399, "access_token": "my_token"}
@@ -488,10 +496,13 @@ class MsTeamsWebhookTest(APITestCase):
         ]
         assert self.metrics.incr.mock_calls == calls
 
+        assert_slo_metric(mock_record, EventLifecycleOutcome.SUCCESS)
+
     @responses.activate
+    @mock.patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
     @mock.patch("sentry.utils.jwt.decode")
     @mock.patch("time.time")
-    def test_link_command_already_linked(self, mock_time, mock_decode):
+    def test_link_command_already_linked(self, mock_time, mock_decode, mock_record):
         other_command = deepcopy(EXAMPLE_UNLINK_COMMAND)
         other_command["text"] = "link"
         with assume_test_silo_mode(SiloMode.CONTROL):
@@ -526,6 +537,8 @@ class MsTeamsWebhookTest(APITestCase):
             in responses.calls[3].request.body.decode("utf-8")
         )
         assert "Bearer my_token" in responses.calls[3].request.headers["Authorization"]
+
+        assert_slo_metric(mock_record, EventLifecycleOutcome.SUCCESS)
 
     @responses.activate
     @mock.patch("sentry.utils.jwt.decode")

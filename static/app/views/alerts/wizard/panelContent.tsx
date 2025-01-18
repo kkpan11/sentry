@@ -2,6 +2,7 @@ import diagramApdex from 'sentry-images/spot/alerts-wizard-apdex.svg';
 import diagramCLS from 'sentry-images/spot/alerts-wizard-cls.svg';
 import diagramCrashFreeSessions from 'sentry-images/spot/alerts-wizard-crash-free-sessions.svg';
 import diagramCrashFreeUsers from 'sentry-images/spot/alerts-wizard-crash-free-users.svg';
+import diagramCrons from 'sentry-images/spot/alerts-wizard-crons.svg';
 import diagramCustomTransaction from 'sentry-images/spot/alerts-wizard-custom.svg';
 import diagramCustomMetrics from 'sentry-images/spot/alerts-wizard-custom-metrics.svg';
 import diagramErrors from 'sentry-images/spot/alerts-wizard-errors.svg';
@@ -11,6 +12,7 @@ import diagramIssues from 'sentry-images/spot/alerts-wizard-issues.svg';
 import diagramLCP from 'sentry-images/spot/alerts-wizard-lcp.svg';
 import diagramThroughput from 'sentry-images/spot/alerts-wizard-throughput.svg';
 import diagramTransactionDuration from 'sentry-images/spot/alerts-wizard-transaction-duration.svg';
+import diagramUptime from 'sentry-images/spot/alerts-wizard-uptime.svg';
 import diagramUsers from 'sentry-images/spot/alerts-wizard-users-experiencing-errors.svg';
 
 import {t} from 'sentry/locale';
@@ -18,7 +20,7 @@ import {t} from 'sentry/locale';
 import type {AlertType} from './options';
 
 type PanelContent = {
-  description: string;
+  description: React.ReactNode;
   examples: string[];
   docsLink?: string;
   illustration?: string;
@@ -159,5 +161,35 @@ export const AlertWizardPanelContent: Record<AlertType, PanelContent> = {
       t('When the Crash Free Rate is below 97%, send an email notification to yourself.'),
     ],
     illustration: diagramCrashFreeUsers,
+  },
+  uptime_monitor: {
+    description: t(
+      'Alert when the availability or reliability of a monitored URL changes, providing instant notifications and insights to quickly detect and resolve issues.'
+    ),
+    examples: [
+      t('When the URL returns a response status code other than 200.'),
+      t('When the URL response times out after 20 seconds.'),
+      t('When a DNS resolution error is detected for the URL.'),
+    ],
+    illustration: diagramUptime,
+  },
+  crons_monitor: {
+    description: t(
+      'Alert on scheduled monitors that check-in on recurring jobs and tell you if they’re running on schedule, failing, or succeeding.'
+    ),
+    examples: [
+      t('When a scheduled job fails during execution'),
+      t("When a scheduled job runs for longer than it's expected runtime"),
+      t('When a scheduled job does not run'),
+    ],
+    illustration: diagramCrons,
+  },
+  eap_metrics: {
+    description: t('Alert on spans.'),
+    examples: [
+      t('When your average time in queue exceeds 100ms.'),
+      t('When your app runs more than 1000 queries in a minute.'),
+    ],
+    illustration: diagramThroughput,
   },
 };

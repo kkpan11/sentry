@@ -7,8 +7,9 @@ import type {mat3} from 'gl-matrix';
 import {vec2} from 'gl-matrix';
 
 import {Button} from 'sentry/components/button';
+import {Flex} from 'sentry/components/container/flex';
+import {FlamegraphContextMenu} from 'sentry/components/profiling/flamegraph/flamegraphContextMenu';
 import {FlamegraphZoomView} from 'sentry/components/profiling/flamegraph/flamegraphZoomView';
-import {Flex} from 'sentry/components/profiling/flex';
 import SwitchButton from 'sentry/components/switchButton';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
@@ -91,13 +92,16 @@ export function DeprecatedAggregateFlamegraph(
       return LOADING_OR_FALLBACK_FLAMEGRAPH;
     }
 
-    const transaction = Sentry.startTransaction({
-      op: 'import',
-      name: 'flamegraph.constructor',
-    });
+    const span = Sentry.withScope(scope => {
+      scope.setTag('sorting', sorting.split(' ').join('_'));
+      scope.setTag('view', view.split(' ').join('_'));
 
-    transaction.setTag('sorting', sorting.split(' ').join('_'));
-    transaction.setTag('view', view.split(' ').join('_'));
+      return Sentry.startInactiveSpan({
+        op: 'import',
+        name: 'flamegraph.constructor',
+        forceTransaction: true,
+      });
+    });
 
     const newFlamegraph = new FlamegraphModel(profile, {
       inverted: view === 'bottom up',
@@ -105,7 +109,7 @@ export function DeprecatedAggregateFlamegraph(
       configSpace: undefined,
     });
 
-    transaction.finish();
+    span?.end();
 
     return newFlamegraph;
   }, [profile, sorting, threadId, view]);
@@ -144,7 +148,7 @@ export function DeprecatedAggregateFlamegraph(
     },
 
     // We skip position.view dependency because it will go into an infinite loop
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
     [flamegraph, flamegraphCanvas, flamegraphTheme]
   );
 
@@ -168,7 +172,6 @@ export function DeprecatedAggregateFlamegraph(
     });
 
     // We skip `flamegraphCanvas` as it causes an infinite loop
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flamegraph, setFlamegraphThemeMutation, flamegraphCanvas?.logicalSpace.height]);
 
   // Uses a useLayoutEffect to ensure that these top level/global listeners are added before
@@ -291,6 +294,7 @@ export function DeprecatedAggregateFlamegraph(
     <Fragment>
       {props.children ? props.children({canvasPoolManager, scheduler, flamegraph}) : null}
       <FlamegraphZoomView
+        scheduler={scheduler}
         profileGroup={profileGroup}
         canvasBounds={flamegraphCanvasBounds}
         canvasPoolManager={canvasPoolManager}
@@ -306,6 +310,7 @@ export function DeprecatedAggregateFlamegraph(
         disableZoom
         disableGrid
         disableCallOrderSort
+        contextMenu={FlamegraphContextMenu}
       />
       {props.hideToolbar ? null : (
         <AggregateFlamegraphToolbar>

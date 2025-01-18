@@ -6,10 +6,10 @@ import responses
 
 from sentry import options
 from sentry.integrations.example.integration import ExampleIntegration
-from tests.sentry.api.endpoints.test_project_stacktrace_link import BaseProjectStacktraceLink
+from tests.sentry.issues.endpoints.test_project_stacktrace_link import BaseProjectStacktraceLink
 
 
-class ProjectStracktraceLinkTestCodecov(BaseProjectStacktraceLink):
+class ProjectStacktraceLinkTestCodecov(BaseProjectStacktraceLink):
     endpoint = "sentry-api-0-project-stacktrace-coverage"
 
     def setUp(self):
@@ -155,6 +155,6 @@ class ProjectStracktraceLinkTestCodecov(BaseProjectStacktraceLink):
             (
                 "sentry.integrations.utils.codecov",
                 logging.ERROR,
-                "Codecov HTTP error: 500. Continuing execution.",
+                "Codecov HTTP error: 500",
             )
         ]

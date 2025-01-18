@@ -7,7 +7,8 @@ import SelectControl from 'sentry/components/forms/controls/selectControl';
 import {Tooltip} from 'sentry/components/tooltip';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {SelectValue, TagCollection} from 'sentry/types';
+import type {SelectValue} from 'sentry/types/core';
+import type {TagCollection} from 'sentry/types/group';
 import {
   EQUATION_PREFIX,
   explodeField,
@@ -54,6 +55,7 @@ export function SortBySelectors({
   disableSortDirection,
   widgetQuery,
   displayType,
+  tags,
 }: Props) {
   const datasetConfig = getDatasetConfig(widgetType);
   const organization = useOrganization();
@@ -82,10 +84,11 @@ export function SortBySelectors({
       >
         <SelectControl
           name="sortDirection"
-          aria-label="Sort direction"
+          aria-label={t('Sort direction')}
           menuPlacement="auto"
           disabled={disableSortDirection}
           options={Object.keys(sortDirections).map(value => ({
+            // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
             label: sortDirections[value],
             value,
           }))}
@@ -105,7 +108,7 @@ export function SortBySelectors({
         {displayType === DisplayType.TABLE ? (
           <SelectControl
             name="sortBy"
-            aria-label="Sort by"
+            aria-label={t('Sort by')}
             menuPlacement="auto"
             disabled={disableSort}
             placeholder={`${t('Select a column')}\u{2026}`}
@@ -134,7 +137,8 @@ export function SortBySelectors({
             }
             fieldOptions={datasetConfig.getTimeseriesSortOptions!(
               organization,
-              widgetQuery
+              widgetQuery,
+              tags
             )}
             filterPrimaryOptions={
               datasetConfig.filterSeriesSortOptions

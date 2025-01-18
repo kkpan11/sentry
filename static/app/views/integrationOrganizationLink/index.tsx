@@ -1,20 +1,23 @@
 import {Fragment} from 'react';
-import type {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 import {urlEncode} from '@sentry/utils';
 
 import {addErrorMessage} from 'sentry/actionCreators/indicator';
 import {Alert} from 'sentry/components/alert';
 import {Button} from 'sentry/components/button';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
 import SelectControl from 'sentry/components/forms/controls/selectControl';
 import FieldGroup from 'sentry/components/forms/fieldGroup';
 import IdBadge from 'sentry/components/idBadge';
 import ExternalLink from 'sentry/components/links/externalLink';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import NarrowLayout from 'sentry/components/narrowLayout';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import {t, tct} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
-import type {Integration, IntegrationProvider, Organization} from 'sentry/types';
+import type {Integration, IntegrationProvider} from 'sentry/types/integrations';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
 import {generateOrgSlugUrl} from 'sentry/utils';
 import type {IntegrationAnalyticsKey} from 'sentry/utils/analytics/integrations';
 import {
@@ -22,15 +25,14 @@ import {
   trackIntegrationAnalytics,
 } from 'sentry/utils/integrationUtil';
 import {singleLineRenderer} from 'sentry/utils/marked';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
-import DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import {DisabledNotice} from 'sentry/views/settings/organizationIntegrations/abstractIntegrationDetailedView';
 import AddIntegration from 'sentry/views/settings/organizationIntegrations/addIntegration';
 
 // installationId present for Github flow
 type Props = RouteComponentProps<{integrationSlug: string; installationId?: string}, {}>;
 
-type State = DeprecatedAsyncView['state'] & {
+type State = DeprecatedAsyncComponent['state'] & {
   installationData?: GitHubIntegrationInstallation;
   installationDataLoading?: boolean;
   organization?: Organization;
@@ -49,18 +51,14 @@ interface GitHubIntegrationInstallation {
   };
 }
 
-export default class IntegrationOrganizationLink extends DeprecatedAsyncView<
+export default class IntegrationOrganizationLink extends DeprecatedAsyncComponent<
   Props,
   State
 > {
   disableErrorReport = false;
 
-  getEndpoints(): ReturnType<DeprecatedAsyncView['getEndpoints']> {
-    return [['organizations', '/organizations/']];
-  }
-
-  getTitle() {
-    return t('Choose Installation Organization');
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
+    return [['organizations', '/organizations/?include_feature_flags=1']];
   }
 
   trackIntegrationAnalytics = (
@@ -138,7 +136,11 @@ export default class IntegrationOrganizationLink extends DeprecatedAsyncView<
         Organization,
         {providers: IntegrationProvider[]},
       ] = await Promise.all([
-        this.api.requestPromise(`/organizations/${orgSlug}/`),
+        this.api.requestPromise(`/organizations/${orgSlug}/`, {
+          query: {
+            include_feature_flags: 1,
+          },
+        }),
         this.api.requestPromise(
           `/organizations/${orgSlug}/config/integrations/?provider_key=${this.integrationSlug}`
         ),
@@ -179,7 +181,7 @@ export default class IntegrationOrganizationLink extends DeprecatedAsyncView<
     return organization?.access.includes('org:integrations');
   };
 
-  // used with Github to redirect to the the integration detail
+  // used with Github to redirect to the integration detail
   onInstallWithInstallationId = (data: Integration) => {
     const {organization} = this.state;
     const orgId = organization?.slug;
@@ -375,6 +377,7 @@ export default class IntegrationOrganizationLink extends DeprecatedAsyncView<
 
     return (
       <NarrowLayout>
+        <SentryDocumentTitle title={t('Choose Installation Organization')} />
         <h3>{t('Finish integration installation')}</h3>
         {this.renderCallout()}
         <p>
@@ -390,6 +393,7 @@ export default class IntegrationOrganizationLink extends DeprecatedAsyncView<
 
         <FieldGroup label={t('Organization')} inline={false} stacked required>
           <SelectControl
+            // @ts-ignore TS(7031): Binding element 'orgSlug' implicitly has an 'any' ... Remove this comment to see the full error message
             onChange={({value: orgSlug}) => this.onSelectOrg(orgSlug)}
             value={selectedOrgSlug}
             placeholder={t('Select an organization')}

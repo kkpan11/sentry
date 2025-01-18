@@ -1,6 +1,4 @@
 import {Fragment} from 'react';
-import type {RouteComponentProps} from 'react-router';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 import debounce from 'lodash/debounce';
 import groupBy from 'lodash/groupBy';
@@ -24,11 +22,12 @@ import type {
   DocIntegration,
   Integration,
   IntegrationProvider,
-  Organization,
   PluginWithProjectList,
   SentryApp,
   SentryAppInstallation,
-} from 'sentry/types';
+} from 'sentry/types/integrations';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
 import {uniq} from 'sentry/utils/array/uniq';
 import type {Fuse} from 'sentry/utils/fuzzySearch';
 import {createFuzzySearch} from 'sentry/utils/fuzzySearch';
@@ -318,8 +317,8 @@ export class IntegrationListDirectory extends DeprecatedAsyncComponent<
   getFilterParameters = (): {searchInput: string; selectedCategory: string} => {
     const {category, search} = qs.parse(this.props.location.search);
 
-    const selectedCategory = Array.isArray(category) ? category[0] : category || '';
-    const searchInput = Array.isArray(search) ? search[0] : search || '';
+    const selectedCategory = Array.isArray(category) ? category[0]! : category || '';
+    const searchInput = Array.isArray(search) ? search[0]! : search || '';
 
     return {searchInput, selectedCategory};
   };
@@ -336,7 +335,7 @@ export class IntegrationListDirectory extends DeprecatedAsyncComponent<
       category: selectedCategory ? selectedCategory : undefined,
     });
 
-    browserHistory.replace({
+    this.props.router.replace({
       pathname: this.props.location.pathname,
       search: searchString ? `?${searchString}` : undefined,
     });
@@ -598,7 +597,7 @@ const EmptyResultsBody = styled('div')`
 `;
 
 const EmptyResultsBodyBold = styled(EmptyResultsBody)`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;
 
 export default withOrganization(IntegrationListDirectory);

@@ -2,7 +2,7 @@ import styled from '@emotion/styled';
 import groupBy from 'lodash/groupBy';
 import moment from 'moment-timezone';
 
-import type {SelectValue} from 'sentry/types';
+import type {SelectValue} from 'sentry/types/core';
 
 type TimezoneGroup =
   | null
@@ -235,7 +235,7 @@ const timezones: [group: TimezoneGroup, value: string, label: string][] = [
   ['Europe', 'Europe/Vilnius', 'Vilnius'],
   ['Europe', 'Europe/Zaporozhye', 'Zaporozhye'],
   ['Europe', 'Europe/Istanbul', 'Istanbul'],
-  ['Europe', 'Europe/Kiev', 'Kiev'],
+  ['Europe', 'Europe/Kyiv', 'Kyiv'],
   ['Europe', 'Europe/Minsk', 'Minsk'],
   ['Europe', 'Europe/Moscow', 'Moscow'],
   ['Europe', 'Europe/Simferopol', 'Simferopol'],
@@ -466,7 +466,7 @@ const timezones: [group: TimezoneGroup, value: string, label: string][] = [
 
 const OffsetLabel = styled('div')`
   color: ${p => p.theme.subText};
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   display: flex;
   align-items: center;
   font-size: ${p => p.theme.fontSizeSmall};
@@ -475,7 +475,7 @@ const OffsetLabel = styled('div')`
 
 const groupedTimezones = Object.entries(groupBy(timezones, ([group]) => group));
 
-// @ts-expect-error Should be removed once these types improve for grouped options
+// @ts-ignore TS(2322): Type '{ label: string; options: { value: string; t... Remove this comment to see the full error message
 const timezoneOptions: SelectValue<string>[] = groupedTimezones.map(([group, zones]) => ({
   label: group,
   options: zones.map(([_, value, label]) => {

@@ -5,8 +5,8 @@ from typing import Any
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
+from sentry.integrations.services.integration.service import integration_service
 from sentry.rules.actions import IntegrationNotifyServiceForm
-from sentry.services.hybrid_cloud.integration.service import integration_service
 
 
 class JiraNotifyServiceForm(IntegrationNotifyServiceForm):
@@ -14,6 +14,8 @@ class JiraNotifyServiceForm(IntegrationNotifyServiceForm):
 
     def clean(self) -> dict[str, Any] | None:
         cleaned_data = super().clean()
+        if cleaned_data is None:
+            return None
 
         integration_id = cleaned_data.get("integration")
         integration = integration_service.get_integration(

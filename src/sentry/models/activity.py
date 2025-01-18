@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -10,42 +11,45 @@ from django.db.models import F
 from django.db.models.signals import post_save
 from django.utils import timezone
 
-from sentry import features, options
+from sentry import options
 from sentry.backup.scopes import RelocationScope
 from sentry.db.models import (
-    BaseManager,
     BoundedPositiveIntegerField,
     FlexibleForeignKey,
     GzippedDictField,
     Model,
-    region_silo_only_model,
+    region_silo_model,
     sane_repr,
 )
 from sentry.db.models.fields.hybrid_cloud_foreign_key import HybridCloudForeignKey
+from sentry.db.models.manager.base import BaseManager
+from sentry.issues.grouptype import get_group_type_by_type_id
 from sentry.tasks import activity
-from sentry.types.activity import CHOICES, ActivityType
+from sentry.types.activity import CHOICES, STATUS_CHANGE_ACTIVITY_TYPES, ActivityType
 from sentry.types.group import PriorityLevel
 
 if TYPE_CHECKING:
     from sentry.models.group import Group
-    from sentry.models.user import User
-    from sentry.services.hybrid_cloud.user import RpcUser
+    from sentry.users.models.user import User
+    from sentry.users.services.user import RpcUser
+
+
+_default_logger = logging.getLogger(__name__)
 
 
 class ActivityManager(BaseManager["Activity"]):
     def get_activities_for_group(self, group: Group, num: int) -> Sequence[Activity]:
         activities = []
         activity_qs = self.filter(group=group).order_by("-datetime")
-        initial_priority = None
 
-        if not features.has("projects:issue-priority", group.project):
-            activity_qs = activity_qs.exclude(type=ActivityType.SET_PRIORITY.value)
-        else:
-            # Check if 'initial_priority' is available and the feature flag is on
-            initial_priority_value = group.get_event_metadata().get("initial_priority")
-            initial_priority = (
-                PriorityLevel(initial_priority_value).to_str() if initial_priority_value else None
-            )
+        # Check if 'initial_priority' is available
+        initial_priority_value = group.get_event_metadata().get(
+            "initial_priority", None
+        ) or group.get_event_metadata().get("initial_priority", None)
+
+        initial_priority = (
+            PriorityLevel(initial_priority_value).to_str() if initial_priority_value else None
+        )
 
         prev_sig = None
         sig = None
@@ -100,7 +104,7 @@ class ActivityManager(BaseManager["Activity"]):
         return activity
 
 
-@region_silo_only_model
+@region_silo_model
 class Activity(Model):
     __relocation_scope__ = RelocationScope.Excluded
 
@@ -112,7 +116,7 @@ class Activity(Model):
     # if the user is not set, it's assumed to be the system
     user_id = HybridCloudForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete="SET_NULL")
     datetime = models.DateTimeField(default=timezone.now)
-    data: models.Field[dict[str, Any], dict[str, Any]] = GzippedDictField(null=True)
+    data: models.Field[dict[str, Any] | None, dict[str, Any]] = GzippedDictField(null=True)
 
     objects: ClassVar[ActivityManager] = ActivityManager()
 
@@ -124,10 +128,10 @@ class Activity(Model):
     __repr__ = sane_repr("project_id", "group_id", "event_id", "user_id", "type", "ident")
 
     @staticmethod
-    def get_version_ident(version):
+    def get_version_ident(version: str | None) -> str:
         return (version or "")[:64]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         from sentry.models.release import Release
 
@@ -139,16 +143,33 @@ class Activity(Model):
         if self.type == ActivityType.ASSIGNED.value:
             self.data["assignee"] = str(self.data["assignee"])
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         created = bool(not self.id)
 
         super().save(*args, **kwargs)
+
+        # The receiver for the post_save signal was not working in production, so just execute directly and safely
+        try:
+            from sentry.integrations.slack.tasks.send_notifications_on_activity import (
+                activity_created_receiver,
+            )
+
+            activity_created_receiver(self, created)
+        except Exception as err:
+            _default_logger.info(
+                "there was an error trying to kick off activity receiver",
+                exc_info=err,
+                extra={
+                    "activity_id": self.id,
+                },
+            )
+            pass
 
         if not created:
             return
 
         # HACK: support Group.num_comments
-        if self.type == ActivityType.NOTE.value:
+        if self.type == ActivityType.NOTE.value and self.group is not None:
             from sentry.models.group import Group
 
             self.group.update(num_comments=F("num_comments") + 1)
@@ -157,11 +178,11 @@ class Activity(Model):
                     sender=Group, instance=self.group, created=True, update_fields=["num_comments"]
                 )
 
-    def delete(self, *args, **kwargs):
-        super().delete(*args, **kwargs)
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        result = super().delete(*args, **kwargs)
 
         # HACK: support Group.num_comments
-        if self.type == ActivityType.NOTE.value:
+        if self.type == ActivityType.NOTE.value and self.group is not None:
             from sentry.models.group import Group
 
             self.group.update(num_comments=F("num_comments") - 1)
@@ -170,7 +191,21 @@ class Activity(Model):
                     sender=Group, instance=self.group, created=True, update_fields=["num_comments"]
                 )
 
-    def send_notification(self):
+        return result
+
+    def send_notification(self) -> None:
+        if self.group:
+            group_type = get_group_type_by_type_id(self.group.type)
+            has_status_change_notifications = group_type.enable_status_change_workflow_notifications
+            is_status_change = self.type in {
+                activity.value for activity in STATUS_CHANGE_ACTIVITY_TYPES
+            }
+
+            # Skip sending the activity notification if the group type does not
+            # support status change workflow notifications
+            if is_status_change and not has_status_change_notifications:
+                return
+
         activity.send_activity_notifications.delay(self.id)
 
 

@@ -1,20 +1,19 @@
 import {Fragment, useEffect, useMemo, useState} from 'react';
 import LazyLoad, {forceCheck} from 'react-lazyload';
-import type {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 import {withProfiler} from '@sentry/react';
 import debounce from 'lodash/debounce';
 import uniqBy from 'lodash/uniqBy';
 
 import type {Client} from 'sentry/api';
-import {Button} from 'sentry/components/button';
+import {LinkButton} from 'sentry/components/button';
 import ButtonBar from 'sentry/components/buttonBar';
 import * as Layout from 'sentry/components/layouts/thirds';
 import LoadingError from 'sentry/components/loadingError';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import NoProjectMessage from 'sentry/components/noProjectMessage';
 import {PageHeadingQuestionTooltip} from 'sentry/components/pageHeadingQuestionTooltip';
-import {useProjectCreationAccess} from 'sentry/components/projects/useProjectCreationAccess';
+import {canCreateProject} from 'sentry/components/projects/canCreateProject';
 import SearchBar from 'sentry/components/searchBar';
 import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import {DEFAULT_DEBOUNCE_DURATION} from 'sentry/constants';
@@ -22,14 +21,18 @@ import {IconAdd, IconUser} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import ProjectsStatsStore from 'sentry/stores/projectsStatsStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project, TeamWithProjects} from 'sentry/types';
-import {sortProjects} from 'sentry/utils';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project, TeamWithProjects} from 'sentry/types/project';
 import {
   onRenderCallback,
   Profiler,
   setGroupedEntityTag,
 } from 'sentry/utils/performanceForSentry';
+import {sortProjects} from 'sentry/utils/project/sortProjects';
 import useOrganization from 'sentry/utils/useOrganization';
+import useProjects from 'sentry/utils/useProjects';
+import {useUser} from 'sentry/utils/useUser';
 import withApi from 'sentry/utils/withApi';
 import withOrganization from 'sentry/utils/withOrganization';
 import withTeamsForUser from 'sentry/utils/withTeamsForUser';
@@ -84,53 +87,66 @@ function Dashboard({teams, organization, loadingTeams, error, router, location}:
       ProjectsStatsStore.reset();
     };
   }, []);
+  const user = useUser();
   const [projectQuery, setProjectQuery] = useState('');
   const debouncedSearchQuery = useMemo(
     () => debounce(handleSearch, DEFAULT_DEBOUNCE_DURATION),
     []
   );
+  const {projects, fetching, fetchError} = useProjects();
 
-  const {canCreateProject} = useProjectCreationAccess({organization});
-  if (loadingTeams) {
+  const showNonMemberProjects = useMemo(() => {
+    const isOrgAdminOrManager =
+      organization.orgRole === 'owner' || organization.orgRole === 'manager';
+    const isOpenMembership = organization.features.includes('open-membership');
+
+    return user.isSuperuser || isOrgAdminOrManager || isOpenMembership;
+  }, [user, organization.orgRole, organization.features]);
+
+  const canUserCreateProject = canCreateProject(organization);
+  if (loadingTeams || fetching) {
     return <LoadingIndicator />;
   }
 
-  if (error) {
+  if (error || fetchError) {
     return <LoadingError message={t('An error occurred while fetching your projects')} />;
   }
-  const canJoinTeam = organization.access.includes('team:read');
 
-  const selectedTeams = getTeamParams(location ? location.query.team : '');
-  const filteredTeams = teams.filter(team => selectedTeams.includes(team.id));
+  const canJoinTeam = organization.access.includes('team:read');
+  const selectedTeams = getTeamParams(location.query.team ?? 'myteams');
+  const filteredTeams =
+    selectedTeams[0] === 'myteams' || selectedTeams.length === 0
+      ? teams
+      : teams.filter(team => selectedTeams.includes(team.id));
 
   const filteredTeamProjects = uniqBy(
     (filteredTeams ?? teams).flatMap(team => team.projects),
     'id'
   );
-  const projects = uniqBy(
-    teams.flatMap(teamObj => teamObj.projects),
-    'id'
-  );
   setGroupedEntityTag('projects.total', 1000, projects.length);
 
-  const currentProjects = selectedTeams.length === 0 ? projects : filteredTeamProjects;
+  const currentProjects =
+    // No teams are specifically selected and query parameter is present
+    // Use all projects if open membership is enabled
+    location.query.team === '' && showNonMemberProjects
+      ? projects
+      : // No teams are specifically selected - Use "myteams"
+        filteredTeamProjects;
   const filteredProjects = (currentProjects ?? projects).filter(project =>
     project.slug.includes(projectQuery)
   );
 
-  const showResources = projects.length === 1 && !projects[0].firstEvent;
+  const showResources = projects.length === 1 && !projects[0]!.firstEvent;
 
   function handleSearch(searchQuery: string) {
     setProjectQuery(searchQuery);
   }
 
   function handleChangeFilter(activeFilters: string[]) {
-    const {...currentQuery} = location.query;
-
     router.push({
       pathname: location.pathname,
       query: {
-        ...currentQuery,
+        ...location.query,
         team: activeFilters.length > 0 ? activeFilters : '',
       },
     });
@@ -153,7 +169,7 @@ function Dashboard({teams, organization, loadingTeams, error, router, location}:
         </Layout.HeaderContent>
         <Layout.HeaderActions>
           <ButtonBar gap={1}>
-            <Button
+            <LinkButton
               size="sm"
               icon={<IconUser />}
               title={
@@ -164,13 +180,13 @@ function Dashboard({teams, organization, loadingTeams, error, router, location}:
               data-test-id="join-team"
             >
               {t('Join a Team')}
-            </Button>
-            <Button
+            </LinkButton>
+            <LinkButton
               size="sm"
               priority="primary"
-              disabled={!canCreateProject}
+              disabled={!canUserCreateProject}
               title={
-                !canCreateProject
+                !canUserCreateProject
                   ? t('You do not have permission to create projects')
                   : undefined
               }
@@ -179,7 +195,7 @@ function Dashboard({teams, organization, loadingTeams, error, router, location}:
               data-test-id="create-project"
             >
               {t('Create Project')}
-            </Button>
+            </LinkButton>
           </ButtonBar>
         </Layout.HeaderActions>
       </Layout.Header>
@@ -189,9 +205,8 @@ function Dashboard({teams, organization, loadingTeams, error, router, location}:
             <TeamFilter
               selectedTeams={selectedTeams}
               handleChangeFilter={handleChangeFilter}
-              showIsMemberTeams
-              showSuggestedOptions={false}
-              showMyTeamsDescription
+              hideUnassigned
+              hideOtherTeams={!showNonMemberProjects}
             />
             <StyledSearchBar
               defaultQuery=""

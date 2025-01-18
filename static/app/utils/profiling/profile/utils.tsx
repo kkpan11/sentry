@@ -1,4 +1,5 @@
-import type {Span} from '@sentry/types';
+import type {Span} from '@sentry/core';
+import * as Sentry from '@sentry/react';
 
 import {defined} from 'sentry/utils';
 import type {FlamegraphFrame} from 'sentry/utils/profiling/flamegraphFrame';
@@ -8,8 +9,8 @@ import type {CallTreeNode} from '../callTreeNode';
 
 type FrameIndex = Record<string | number, Frame>;
 
-export function createSentrySampleProfileFrameIndex(
-  frames: Profiling.SentrySampledProfile['profile']['frames'],
+export function createContinuousProfileFrameIndex(
+  frames: Profiling.SentryContinousProfileChunk['profile']['frames'],
   platform: 'mobile' | 'node' | 'javascript' | string
 ): FrameIndex {
   const index: FrameIndex = {};
@@ -17,10 +18,10 @@ export function createSentrySampleProfileFrameIndex(
   let idx = -1;
 
   for (let i = 0; i < frames.length; i++) {
-    const frame = frames[i];
-    const frameKey = `${frame.filename ?? ''}:${frame.function ?? 'unknown'}:${
-      String(frame.lineno) ?? ''
-    }:${frame.instruction_addr ?? ''}`;
+    const frame = frames[i]!;
+    const frameKey = `${frame.filename ?? ''}:${frame.function ?? 'unknown'}:${String(
+      frame.lineno
+    )}:${frame.instruction_addr ?? ''}`;
 
     const existing = insertionCache[frameKey];
     if (existing) {
@@ -38,7 +39,52 @@ export function createSentrySampleProfileFrameIndex(
         package: frame.package,
         name: frame.function ?? 'unknown',
         line: frame.lineno,
-        column: frame.colno,
+        column: frame.colno ?? frame?.col ?? frame?.column,
+        instructionAddr: frame.instruction_addr,
+        symbol: frame.symbol,
+        symbolAddr: frame.sym_addr,
+        symbolicatorStatus: frame.status,
+      },
+      platform
+    );
+    index[++idx] = f;
+    insertionCache[frameKey] = f;
+  }
+
+  return index;
+}
+
+export function createSentrySampleProfileFrameIndex(
+  frames: Profiling.SentrySampledProfile['profile']['frames'],
+  platform: 'mobile' | 'node' | 'javascript' | string
+): FrameIndex {
+  const index: FrameIndex = {};
+  const insertionCache: Record<string, Frame> = {};
+  let idx = -1;
+
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i]!;
+    const frameKey = `${frame.filename ?? ''}:${frame.function ?? 'unknown'}:${String(
+      frame.lineno
+    )}:${frame.instruction_addr ?? ''}`;
+
+    const existing = insertionCache[frameKey];
+    if (existing) {
+      index[++idx] = existing;
+      continue;
+    }
+
+    const f = new Frame(
+      {
+        key: i,
+        is_application: frame.in_app,
+        file: frame.filename,
+        path: frame.abs_path,
+        module: frame.module,
+        package: frame.package,
+        name: frame.function ?? 'unknown',
+        line: frame.lineno,
+        column: frame.colno ?? frame?.col ?? frame?.column,
         instructionAddr: frame.instruction_addr,
         symbol: frame.symbol,
         symbolAddr: frame.sym_addr,
@@ -69,6 +115,7 @@ export function createFrameIndex(
 ): FrameIndex {
   if (trace) {
     return (frames as JSSelfProfiling.Frame[]).reduce((acc, frame, index) => {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       acc[index] = new Frame(
         {
           key: index,
@@ -85,9 +132,11 @@ export function createFrameIndex(
   }
 
   return (frames as Profiling.Schema['shared']['frames']).reduce((acc, frame, index) => {
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     acc[index] = new Frame(
       {
         key: index,
+        column: frame.colno ?? frame?.col ?? frame?.column,
         ...frame,
       },
       type
@@ -126,9 +175,10 @@ export function memoizeByReference<Arguments, Value>(
 
 type Arguments<F extends Function> = F extends (...args: infer A) => any ? A : never;
 
-export function memoizeVariadicByReference<T extends (...args) => V, V = ReturnType<T>>(
-  fn: T
-): (...t: Arguments<T>) => V {
+export function memoizeVariadicByReference<
+  T extends (...args: any[]) => V,
+  V = ReturnType<T>,
+>(fn: T): (...t: Arguments<T>) => V {
   let cache: Cache<Arguments<T>, V> | null = null;
 
   return function memoizeByReferenceCallback(...args: Arguments<T>): V {
@@ -154,20 +204,20 @@ export function memoizeVariadicByReference<T extends (...args) => V, V = ReturnT
   };
 }
 
-export function wrapWithSpan<T>(parentSpan: Span | undefined, fn: () => T, options): T {
+export function wrapWithSpan<T>(
+  parentSpan: Span | undefined,
+  fn: () => T,
+  options: any
+): T {
   if (!defined(parentSpan)) {
     return fn();
   }
 
-  const sentrySpan = parentSpan.startChild(options);
-  try {
-    return fn();
-  } catch (error) {
-    sentrySpan.setStatus('internal_error');
-    throw error;
-  } finally {
-    sentrySpan.finish();
-  }
+  return Sentry.withActiveSpan(parentSpan, () => {
+    return Sentry.startSpan(options, () => {
+      return fn();
+    });
+  });
 }
 
 export const isSystemCall = (node: CallTreeNode): boolean => {
@@ -204,18 +254,18 @@ function indexNodeToParents(
   // Begin in each root node
   for (let i = 0; i < roots.length; i++) {
     // If the root is a leaf node, push it to the leafs array
-    if (!roots[i].children?.length) {
-      leafs.push(roots[i]);
+    if (!roots[i]!.children?.length) {
+      leafs.push(roots[i]!);
     }
 
     // Init the map for the root in case we havent yet
-    if (!map[roots[i].key]) {
-      map[roots[i].key] = [];
+    if (!map[roots[i]!.key]) {
+      map[roots[i]!.key] = [];
     }
 
     // descend down to each child and index them
-    for (let j = 0; j < roots[i].children.length; j++) {
-      indexNode(roots[i].children[j], roots[i]);
+    for (let j = 0; j < roots[i]!.children.length; j++) {
+      indexNode(roots[i]!.children[j]!, roots[i]!);
     }
   }
 }
@@ -258,9 +308,104 @@ export const invertCallTree = (roots: Readonly<FlamegraphFrame[]>): FlamegraphFr
 
 export function resolveFlamegraphSamplesProfileIds(
   samplesProfiles: Readonly<number[][]>,
-  profileIds: Readonly<string[]>
-): string[][] {
+  profileIds: Profiling.ProfileReference[]
+): Profiling.ProfileReference[][] {
   return samplesProfiles.map(profileIdIndices => {
-    return profileIdIndices.map(i => profileIds[i]);
+    return profileIdIndices.map(i => profileIds[i]!);
+  });
+}
+
+interface SortableProfileSample {
+  stack_id: number;
+}
+
+export function sortProfileSamples<S extends SortableProfileSample>(
+  samples: Readonly<S[]>,
+  stacks: Readonly<Profiling.SentrySampledProfile['profile']['stacks']>,
+  frames: Readonly<Profiling.SentrySampledProfile['profile']['frames']>,
+  frameFilter?: (i: number) => boolean
+) {
+  const frameIds = [...Array(frames.length).keys()].sort((a, b) => {
+    const frameA = frames[a]!;
+    const frameB = frames[b]!;
+
+    if (defined(frameA.function) && defined(frameB.function)) {
+      // sort alphabetically first
+      const ret = frameA.function.localeCompare(frameB.function);
+      if (ret !== 0) {
+        return ret;
+      }
+
+      // break ties using the line number
+      if (defined(frameA.lineno) && defined(frameB.lineno)) {
+        return frameA.lineno - frameB.lineno;
+      }
+
+      if (defined(frameA.lineno)) {
+        return -1;
+      }
+
+      if (defined(frameB.lineno)) {
+        return 1;
+      }
+    } else if (defined(frameA.function)) {
+      // if only frameA is defined, it goes first
+      return -1;
+    } else if (defined(frameB.function)) {
+      // if only frameB is defined, it goes first
+      return 1;
+    }
+
+    // if neither functions are defined, they're treated as equal
+    return 0;
+  });
+
+  const framesMapping = frameIds.reduce(
+    (acc, frameId, idx) => {
+      acc[frameId] = idx;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  return [...samples].sort((a, b) => {
+    // same stack id, these are the same
+    if (a.stack_id === b.stack_id) {
+      return 0;
+    }
+
+    const stackA = frameFilter
+      ? stacks[a.stack_id].filter(frameFilter)
+      : stacks[a.stack_id];
+    const stackB = frameFilter
+      ? stacks[b.stack_id].filter(frameFilter)
+      : stacks[b.stack_id];
+
+    const minDepth = Math.min(stackA.length, stackB.length);
+
+    for (let i = 0; i < minDepth; i++) {
+      // we iterate from the end of each stack because that's where the main function is
+      const frameIdA = stackA[stackA.length - i - 1];
+      const frameIdB = stackB[stackB.length - i - 1];
+
+      // same frame id, so check the next frame in the stack
+      if (frameIdA === frameIdB) {
+        continue;
+      }
+
+      const frameIdxA = framesMapping[frameIdA]!;
+      const frameIdxB = framesMapping[frameIdB]!;
+
+      // same frame idx, so check the next frame in the stack
+      if (frameIdxA === frameIdxB) {
+        continue;
+      }
+
+      return frameIdxA - frameIdxB;
+    }
+
+    // if all frames up to the depth of the shorter stack matches,
+    // then the deeper stack goes first
+    return stackB.length - stackA.length;
   });
 }

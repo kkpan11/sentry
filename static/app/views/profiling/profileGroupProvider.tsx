@@ -6,10 +6,9 @@ import type {ProfileGroup} from 'sentry/utils/profiling/profile/importProfile';
 import {importProfile} from 'sentry/utils/profiling/profile/importProfile';
 
 type ProfileGroupContextValue = ProfileGroup;
-
 const ProfileGroupContext = createContext<ProfileGroupContextValue | null>(null);
 
-export function useProfileGroup() {
+export function useProfileGroup(): ProfileGroup {
   const context = useContext(ProfileGroupContext);
   if (!context) {
     throw new Error('useProfileGroup was called outside of ProfileGroupProvider');
@@ -25,6 +24,7 @@ export const LOADING_PROFILE_GROUP: Readonly<ProfileGroup> = {
   measurements: {},
   traceID: '',
   profiles: [],
+  type: 'loading',
 };
 
 interface ProfileGroupProviderProps {
@@ -40,8 +40,17 @@ export function ProfileGroupProvider(props: ProfileGroupProviderProps) {
     if (!props.input) {
       return LOADING_PROFILE_GROUP;
     }
+    const qs = new URLSearchParams(window.location.search);
+    const threadId = qs.get('tid');
+
     try {
-      return importProfile(props.input, props.traceID, props.type, props.frameFilter);
+      return importProfile(
+        props.input,
+        props.traceID,
+        threadId,
+        props.type,
+        props.frameFilter
+      );
     } catch (err) {
       Sentry.captureException(err);
       return LOADING_PROFILE_GROUP;

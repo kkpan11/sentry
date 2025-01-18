@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from functools import cached_property
 from time import time
 from typing import Any
 from unittest.mock import patch
 
+import orjson
 import pytest
 import responses
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 from responses import matchers
 
 from fixtures.vsts import (
@@ -17,20 +17,19 @@ from fixtures.vsts import (
     WORK_ITEM_STATES,
 )
 from sentry.integrations.mixins import ResolveSyncAction
+from sentry.integrations.models.external_issue import ExternalIssue
+from sentry.integrations.models.integration_external_project import IntegrationExternalProject
+from sentry.integrations.services.integration import integration_service
 from sentry.integrations.vsts.integration import VstsIntegration
-from sentry.models.identity import Identity
-from sentry.models.integrations.external_issue import ExternalIssue
-from sentry.models.integrations.integration_external_project import IntegrationExternalProject
-from sentry.services.hybrid_cloud.integration import integration_service
-from sentry.services.hybrid_cloud.user.service import user_service
 from sentry.shared_integrations.exceptions import IntegrationError
 from sentry.silo.base import SiloMode
 from sentry.silo.util import PROXY_PATH
 from sentry.testutils.cases import TestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
+from sentry.testutils.helpers.datetime import before_now
 from sentry.testutils.silo import assume_test_silo_mode, region_silo_test
 from sentry.testutils.skips import requires_snuba
-from sentry.utils import json
+from sentry.users.models.identity import Identity
+from sentry.users.services.user.service import user_service
 
 pytestmark = [requires_snuba]
 
@@ -71,10 +70,6 @@ def assert_response_calls(expected_region_response, expected_non_region_response
 
 
 class VstsIssueBase(TestCase):
-    @cached_property
-    def request(self):
-        return RequestFactory()
-
     def setUp(self):
         with assume_test_silo_mode(SiloMode.CONTROL):
             model = self.create_provider_integration(
@@ -189,7 +184,7 @@ class VstsIssueSyncTest(VstsIssueBase):
         }
         request = responses.calls[-1].request
         assert request.headers["Content-Type"] == "application/json-patch+json"
-        payload = json.loads(request.body)
+        payload = orjson.loads(request.body)
         assert payload == [
             {"op": "add", "path": "/fields/System.Title", "value": "Hello"},
             # Adds both a comment and a description.
@@ -197,6 +192,16 @@ class VstsIssueSyncTest(VstsIssueBase):
             {"op": "add", "path": "/fields/System.Description", "value": "<p>Fix this.</p>\n"},
             {"op": "add", "path": "/fields/System.History", "value": "<p>Fix this.</p>\n"},
         ]
+
+    @responses.activate
+    def test_create_issue_failure(self):
+        form_data = {
+            "title": "rip",
+            "description": "Goodnight, sweet prince",
+        }
+
+        with pytest.raises(ValueError):
+            self.integration.create_issue(form_data)
 
     @responses.activate
     def test_get_issue(self):
@@ -256,7 +261,7 @@ class VstsIssueSyncTest(VstsIssueBase):
             ],
         )
 
-        request_body = json.loads(responses.calls[1].request.body)
+        request_body = orjson.loads(responses.calls[1].request.body)
         assert len(request_body) == 1
         assert request_body[0]["path"] == "/fields/System.AssignedTo"
         assert request_body[0]["value"] == "ftotten@vscsi.us"
@@ -319,7 +324,7 @@ class VstsIssueSyncTest(VstsIssueBase):
             ],
         )
 
-        request_body = json.loads(responses.calls[2].request.body)
+        request_body = orjson.loads(responses.calls[2].request.body)
         assert len(request_body) == 1
         assert request_body[0]["path"] == "/fields/System.AssignedTo"
         assert request_body[0]["value"] == "ftotten@vscsi.us"
@@ -376,7 +381,7 @@ class VstsIssueSyncTest(VstsIssueBase):
             req.url
             == f"https://fabrikam-fiber-inc.visualstudio.com/_apis/wit/workitems/{vsts_work_item_id}"
         )
-        assert json.loads(req.body) == [
+        assert orjson.loads(req.body) == [
             {"path": "/fields/System.State", "value": "Resolved", "op": "replace"}
         ]
         assert responses.calls[2].response.status_code == 200
@@ -474,7 +479,7 @@ class VstsIssueFormTest(VstsIssueBase):
                 "count": 2,
             },
         )
-        min_ago = iso_format(before_now(minutes=1))
+        min_ago = before_now(minutes=1).isoformat()
         event = self.store_event(
             data={"fingerprint": ["group1"], "timestamp": min_ago}, project_id=self.project.id
         )

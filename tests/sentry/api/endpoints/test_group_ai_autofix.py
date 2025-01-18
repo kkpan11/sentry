@@ -1,61 +1,115 @@
-from unittest.mock import ANY, patch
+from datetime import datetime, timedelta
+from unittest.mock import ANY, Mock, patch
 
+from sentry.api.endpoints.group_ai_autofix import TIMEOUT_SECONDS, GroupAutofixEndpoint
+from sentry.autofix.utils import AutofixState, AutofixStatus
 from sentry.models.group import Group
 from sentry.testutils.cases import APITestCase, SnubaTestCase
 from sentry.testutils.helpers.datetime import before_now
-from sentry.testutils.silo import region_silo_test
+from sentry.testutils.helpers.features import apply_feature_flag_on_cls
 from sentry.testutils.skips import requires_snuba
 from sentry.utils.samples import load_data
 
 pytestmark = [requires_snuba]
 
 
-@region_silo_test
-class GroupAIAutofixEndpointTest(APITestCase, SnubaTestCase):
-    def test_ai_autofix_get_endpoint_with_autofix(self):
+@apply_feature_flag_on_cls("organizations:gen-ai-features")
+class GroupAutofixEndpointTest(APITestCase, SnubaTestCase):
+    def _get_url(self, group_id: int):
+        return f"/api/0/issues/{group_id}/autofix/"
+
+    def setUp(self):
+        super().setUp()
+
+        self.organization.update_option("sentry:gen_ai_consent_v2024_11_14", True)
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_autofix_state")
+    def test_ai_autofix_get_endpoint_with_autofix(self, mock_get_autofix_state):
         group = self.create_group()
-        metadata = {
-            "autofix": {
-                "status": "PROCESSING",
-            }
-        }
-        group.data["metadata"] = metadata
-        group.save()
+        mock_get_autofix_state.return_value = AutofixState(
+            run_id=123,
+            request={"project_id": 456, "issue": {"id": 789}},
+            updated_at=datetime.fromisoformat("2023-07-18T12:00:00Z"),
+            status=AutofixStatus.PROCESSING,
+        )
 
         self.login_as(user=self.user)
-        url = f"/api/0/issues/{group.id}/ai-autofix/"
-        response = self.client.get(url, format="json")
+        response = self.client.get(self._get_url(group.id), format="json")
 
         assert response.status_code == 200
         assert response.data["autofix"] is not None
         assert response.data["autofix"]["status"] == "PROCESSING"
 
-    def test_ai_autofix_get_endpoint_without_autofix(self):
+        mock_get_autofix_state.assert_called_once_with(group_id=group.id)
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_autofix_state")
+    def test_ai_autofix_get_endpoint_without_autofix(self, mock_get_autofix_state):
         group = self.create_group()
-        metadata = {
-            "autofix": None,
-        }
-        group.data["metadata"] = metadata
-        group.save()
+        mock_get_autofix_state.return_value = None
 
         self.login_as(user=self.user)
-        url = f"/api/0/issues/{group.id}/ai-autofix/"
-        response = self.client.get(url, format="json")
+        response = self.client.get(self._get_url(group.id), format="json")
 
         assert response.status_code == 200
         assert response.data["autofix"] is None
 
-    def test_ai_autofix_post_endpoint(self):
+        mock_get_autofix_state.assert_called_once_with(group_id=group.id)
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_autofix_state")
+    @patch("sentry.api.endpoints.group_ai_autofix.get_sorted_code_mapping_configs")
+    def test_ai_autofix_get_endpoint_repositories(
+        self, mock_get_sorted_code_mapping_configs, mock_get_autofix_state
+    ):
+        group = self.create_group()
+        mock_get_autofix_state.return_value = AutofixState(
+            run_id=123,
+            request={"project_id": 456, "issue": {"id": 789}},
+            updated_at=datetime.fromisoformat("2023-07-18T12:00:00Z"),
+            status=AutofixStatus.PROCESSING,
+        )
+
+        class TestRepo:
+            def __init__(self):
+                self.url = "example.com"
+                self.external_id = "id123"
+                self.name = "test_repo"
+                self.provider = "github"
+
+        mock_get_sorted_code_mapping_configs.return_value = [
+            Mock(repository=TestRepo(), default_branch="main"),
+        ]
+
+        self.login_as(user=self.user)
+        response = self.client.get(self._get_url(group.id), format="json")
+
+        assert response.status_code == 200
+        assert response.data["autofix"] is not None
+        assert len(response.data["autofix"]["repositories"]) == 1
+        assert response.data["autofix"]["repositories"][0]["default_branch"] == "main"
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._get_profile_for_event")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._call_autofix")
+    @patch("sentry.tasks.autofix.check_autofix_status.apply_async")
+    def test_ai_autofix_post_endpoint(
+        self, mock_check_autofix_status, mock_call, mock_get_profile, mock_profiling_service
+    ):
+        # Mock profile data
+        mock_get_profile.return_value = {"profile_data": "test"}
+        mock_profiling_service.return_value.status = 200
+        mock_profiling_service.return_value.data = (
+            b'{"profile": {"frames": [], "stacks": [], "samples": [], "thread_metadata": {}}}'
+        )
+
         release = self.create_release(project=self.project, version="1.0.0")
 
         repo = self.create_repo(
             project=self.project,
             name="getsentry/sentry",
             provider="integrations:github",
+            external_id="123",
         )
-        repo.save()
-
-        self.create_commit(project=self.project, release=release, key="1234", repo=repo)
+        self.create_code_mapping(project=self.project, repo=repo)
 
         data = load_data("python", timestamp=before_now(minutes=1))
         event = self.store_event(
@@ -72,41 +126,70 @@ class GroupAIAutofixEndpointTest(APITestCase, SnubaTestCase):
         assert group is not None
         group.save()
 
-        url = f"/api/0/issues/{group.id}/ai-autofix/"
+        mock_call.return_value = 123  # Mocking the run_id returned by _call_autofix
+
         self.login_as(user=self.user)
-        with patch(
-            "sentry.api.endpoints.group_ai_autofix.GroupAiAutofixEndpoint._call_autofix"
-        ) as mock_call:
-            response = self.client.post(url, data={"additional_context": "Yes"}, format="json")
-            mock_call.assert_called_with(
-                ANY,
-                "1234",
-                ANY,
-                "Yes",
-            )
+        response = self.client.post(
+            self._get_url(group.id),
+            data={"instruction": "Yes", "event_id": event.event_id},
+            format="json",
+        )
+        mock_call.assert_called_with(
+            ANY,
+            group,
+            [
+                {
+                    "provider": "integrations:github",
+                    "owner": "getsentry",
+                    "name": "sentry",
+                    "external_id": "123",
+                }
+            ],
+            ANY,
+            {"profile_data": "test"},
+            "Yes",
+            TIMEOUT_SECONDS,
+            None,
+        )
 
-            actual_group_arg = mock_call.call_args[0][0]
-            assert actual_group_arg.id == group.id
+        actual_group_arg = mock_call.call_args[0][1]
+        assert actual_group_arg.id == group.id
 
-            entries_arg = mock_call.call_args[0][2]
-            assert any([entry.get("type") == "exception" for entry in entries_arg])
-
-        group = Group.objects.get(id=group.id)
-
+        serialized_event_arg = mock_call.call_args[0][3]
+        assert any(
+            [entry.get("type") == "exception" for entry in serialized_event_arg.get("entries", [])]
+        )
         assert response.status_code == 202
-        assert "autofix" in group.data["metadata"]
-        assert group.data["metadata"]["autofix"]["status"] == "PROCESSING"
 
-    def test_ai_autofix_with_invalid_repo(self):
+        mock_check_autofix_status.assert_called_once_with(args=[123], countdown=900)
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._get_profile_for_event")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._call_autofix")
+    @patch("sentry.tasks.autofix.check_autofix_status.apply_async")
+    def test_ai_autofix_post_without_event_id(
+        self,
+        mock_check_autofix_status,
+        mock_call,
+        mock_get_profile,
+        mock_profiling_service,
+    ):
+        # Mock profile data
+        mock_get_profile.return_value = {"profile_data": "test"}
+        mock_profiling_service.return_value.status = 200
+        mock_profiling_service.return_value.data = (
+            b'{"profile": {"frames": [], "stacks": [], "samples": [], "thread_metadata": {}}}'
+        )
+
         release = self.create_release(project=self.project, version="1.0.0")
 
-        # Creating a repository with a name that is not 'getsentry/sentry'
-        invalid_repo = self.create_repo(
-            project=self.project, name="invalid/repo", provider="integrations:github"
+        repo = self.create_repo(
+            project=self.project,
+            name="getsentry/sentry",
+            provider="integrations:github",
+            external_id="123",
         )
-        invalid_repo.save()
-
-        self.create_commit(project=self.project, release=release, key="1234", repo=invalid_repo)
+        self.create_code_mapping(project=self.project, repo=repo)
 
         data = load_data("python", timestamp=before_now(minutes=1))
         event = self.store_event(
@@ -123,33 +206,209 @@ class GroupAIAutofixEndpointTest(APITestCase, SnubaTestCase):
         assert group is not None
         group.save()
 
-        url = f"/api/0/issues/{group.id}/ai-autofix/"
-        self.login_as(user=self.user)
+        mock_call.return_value = 123  # Mocking the run_id returned by _call_autofix
 
-        with patch(
-            "sentry.api.endpoints.group_ai_autofix.GroupAiAutofixEndpoint._call_autofix"
-        ) as mock_call:
-            response = self.client.post(url, data={"additional_context": "Yes"}, format="json")
-            mock_call.assert_not_called()
+        self.login_as(user=self.user)
+        response = self.client.post(
+            self._get_url(group.id), data={"instruction": "Yes"}, format="json"
+        )
+        mock_call.assert_called_with(
+            ANY,
+            group,
+            [
+                {
+                    "provider": "integrations:github",
+                    "owner": "getsentry",
+                    "name": "sentry",
+                    "external_id": "123",
+                }
+            ],
+            ANY,
+            {"profile_data": "test"},
+            "Yes",
+            TIMEOUT_SECONDS,
+            None,
+        )
+
+        actual_group_arg = mock_call.call_args[0][1]
+        assert actual_group_arg.id == group.id
+
+        serialized_event_arg = mock_call.call_args[0][3]
+        assert any(
+            [entry.get("type") == "exception" for entry in serialized_event_arg.get("entries", [])]
+        )
+        assert response.status_code == 202
+
+        mock_check_autofix_status.assert_called_once_with(args=[123], countdown=900)
+
+    @patch("sentry.models.Group.get_recommended_event_for_environments", return_value=None)
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._get_profile_for_event")
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._call_autofix")
+    @patch("sentry.tasks.autofix.check_autofix_status.apply_async")
+    def test_ai_autofix_post_without_event_id_no_recommended_event(
+        self,
+        mock_check_autofix_status,
+        mock_call,
+        mock_get_profile,
+        mock_profiling_service,
+        mock_event,
+    ):
+        # Mock profile data
+        mock_get_profile.return_value = {"profile_data": "test"}
+        mock_profiling_service.return_value.status = 200
+        mock_profiling_service.return_value.data = (
+            b'{"profile": {"frames": [], "stacks": [], "samples": [], "thread_metadata": {}}}'
+        )
+
+        release = self.create_release(project=self.project, version="1.0.0")
+
+        repo = self.create_repo(
+            project=self.project,
+            name="getsentry/sentry",
+            provider="integrations:github",
+            external_id="123",
+        )
+        self.create_code_mapping(project=self.project, repo=repo)
+
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "release": release.version,
+                "exception": {"values": [{"type": "exception", "data": {"values": []}}]},
+            },
+            project_id=self.project.id,
+        )
+
+        group = event.group
+
+        assert group is not None
+        group.save()
+
+        mock_call.return_value = 123  # Mocking the run_id returned by _call_autofix
+
+        self.login_as(user=self.user)
+        response = self.client.post(
+            self._get_url(group.id), data={"instruction": "Yes"}, format="json"
+        )
+        mock_call.assert_called_with(
+            ANY,
+            group,
+            [
+                {
+                    "provider": "integrations:github",
+                    "owner": "getsentry",
+                    "name": "sentry",
+                    "external_id": "123",
+                }
+            ],
+            ANY,
+            {"profile_data": "test"},
+            "Yes",
+            TIMEOUT_SECONDS,
+            None,
+        )
+
+        actual_group_arg = mock_call.call_args[0][1]
+        assert actual_group_arg.id == group.id
+
+        serialized_event_arg = mock_call.call_args[0][3]
+        assert any(
+            [entry.get("type") == "exception" for entry in serialized_event_arg.get("entries", [])]
+        )
+
+        assert response.status_code == 202
+
+        mock_check_autofix_status.assert_called_once_with(args=[123], countdown=900)
+
+    @patch("sentry.models.Group.get_recommended_event_for_environments", return_value=None)
+    @patch("sentry.models.Group.get_latest_event", return_value=None)
+    def test_ai_autofix_post_without_event_id_error(
+        self, mock_latest_event, mock_recommended_event
+    ):
+        release = self.create_release(project=self.project, version="1.0.0")
+
+        repo = self.create_repo(
+            project=self.project,
+            name="getsentry/sentry",
+            provider="integrations:github",
+            external_id="123",
+        )
+        self.create_code_mapping(project=self.project, repo=repo)
+
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "release": release.version,
+                "exception": {"values": [{"type": "exception", "data": {"values": []}}]},
+            },
+            project_id=self.project.id,
+        )
+
+        group = event.group
+
+        assert group is not None
+        group.save()
+
+        self.login_as(user=self.user)
+        response = self.client.post(
+            self._get_url(group.id), data={"instruction": "Yes"}, format="json"
+        )
+        assert response.status_code == 400
+
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._call_autofix")
+    def test_ai_autofix_without_code_mapping(self, mock_call):
+        release = self.create_release(project=self.project, version="1.0.0")
+
+        self.create_repo(
+            project=self.project,
+            name="invalid-repo",
+            provider="integrations:someotherprovider",
+            external_id="123",
+        )
+
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "release": release.version,
+                "exception": {"values": [{"type": "exception", "data": {"values": []}}]},
+            },
+            project_id=self.project.id,
+        )
+
+        group = event.group
+
+        assert group is not None
+        group.save()
+
+        self.login_as(user=self.user)
+        response = self.client.post(
+            self._get_url(group.id),
+            data={"instruction": "Yes", "event_id": event.event_id},
+            format="json",
+        )
+        mock_call.assert_not_called()
 
         group = Group.objects.get(id=group.id)
 
-        error_msg = "No valid base commit from the public sentry repo found associated through issue's releases; only the public sentry repo is supported right now."
+        error_msg = "Found no Github repositories linked to this project. Please set up the Github Integration and code mappings if you haven't"
 
         assert response.status_code == 400  # Expecting a Bad Request response for invalid repo
         assert response.data["detail"] == error_msg
 
-        assert "autofix" in group.data["metadata"]
-        assert group.data["metadata"]["autofix"]["status"] == "ERROR"
-        assert group.data["metadata"]["autofix"]["error_message"] == error_msg
-        assert group.data["metadata"]["autofix"]["steps"] == []
-
-    def test_ai_autofix_without_stacktrace(self):
+    @patch("sentry.api.endpoints.group_ai_autofix.GroupAutofixEndpoint._call_autofix")
+    def test_ai_autofix_without_stacktrace(self, mock_call):
         release = self.create_release(project=self.project, version="1.0.0")
 
         # Creating a repository with a valid name 'getsentry/sentry'
         valid_repo = self.create_repo(
-            project=self.project, name="getsentry/sentry", provider="integrations:github"
+            project=self.project,
+            name="getsentry/sentry",
+            provider="integrations:github",
+            external_id="123",
         )
         valid_repo.save()
 
@@ -172,14 +431,13 @@ class GroupAIAutofixEndpointTest(APITestCase, SnubaTestCase):
         assert group is not None
         group.save()
 
-        url = f"/api/0/issues/{group.id}/ai-autofix/"
         self.login_as(user=self.user)
-
-        with patch(
-            "sentry.api.endpoints.group_ai_autofix.GroupAiAutofixEndpoint._call_autofix"
-        ) as mock_call:
-            response = self.client.post(url, data={"additional_context": "Yes"}, format="json")
-            mock_call.assert_not_called()
+        response = self.client.post(
+            self._get_url(group.id),
+            data={"instruction": "Yes", "event_id": event.event_id},
+            format="json",
+        )
+        mock_call.assert_not_called()
 
         group = Group.objects.get(id=group.id)
 
@@ -188,7 +446,270 @@ class GroupAIAutofixEndpointTest(APITestCase, SnubaTestCase):
         assert response.status_code == 400  # Expecting a Bad Request response for invalid repo
         assert response.data["detail"] == error_msg
 
-        assert "autofix" in group.data["metadata"]
-        assert group.data["metadata"]["autofix"]["status"] == "ERROR"
-        assert group.data["metadata"]["autofix"]["error_message"] == error_msg
-        assert group.data["metadata"]["autofix"]["steps"] == []
+    def test_convert_profile_to_execution_tree(self):
+        profile_data = {
+            "profile": {
+                "frames": [
+                    {
+                        "function": "main",
+                        "module": "app.main",
+                        "filename": "main.py",
+                        "lineno": 10,
+                        "in_app": True,
+                    },
+                    {
+                        "function": "helper",
+                        "module": "app.utils",
+                        "filename": "utils.py",
+                        "lineno": 20,
+                        "in_app": True,
+                    },
+                    {
+                        "function": "external",
+                        "module": "external.lib",
+                        "filename": "lib.py",
+                        "lineno": 30,
+                        "in_app": False,
+                    },
+                ],
+                "stacks": [
+                    [2, 1, 0]
+                ],  # One stack with three frames. In a call stack, the first function is the last frame
+                "samples": [{"stack_id": 0, "thread_id": "1"}],
+                "thread_metadata": {"1": {"name": "MainThread"}},
+            }
+        }
+
+        execution_tree = GroupAutofixEndpoint()._convert_profile_to_execution_tree(profile_data)
+
+        # Should only include in_app frames from MainThread
+        assert len(execution_tree) == 1  # One root node
+        root = execution_tree[0]
+        assert root["function"] == "main"
+        assert root["module"] == "app.main"
+        assert root["filename"] == "main.py"
+        assert root["lineno"] == 10
+        assert len(root["children"]) == 1
+
+        child = root["children"][0]
+        assert child["function"] == "helper"
+        assert child["module"] == "app.utils"
+        assert child["filename"] == "utils.py"
+        assert child["lineno"] == 20
+        assert len(child["children"]) == 0  # No children for the last in_app frame
+
+    def test_convert_profile_to_execution_tree_non_main_thread(self):
+        """Test that non-MainThread samples are excluded from execution tree"""
+        profile_data = {
+            "profile": {
+                "frames": [
+                    {
+                        "function": "worker",
+                        "module": "app.worker",
+                        "filename": "worker.py",
+                        "lineno": 10,
+                        "in_app": True,
+                    }
+                ],
+                "stacks": [[0]],
+                "samples": [{"stack_id": 0, "thread_id": "2"}],
+                "thread_metadata": {"2": {"name": "WorkerThread"}},
+            }
+        }
+
+        execution_tree = GroupAutofixEndpoint()._convert_profile_to_execution_tree(profile_data)
+
+        # Should be empty since no MainThread samples
+        assert len(execution_tree) == 0
+
+    def test_convert_profile_to_execution_tree_merges_duplicate_frames(self):
+        """Test that duplicate frames in different samples are merged correctly"""
+        profile_data = {
+            "profile": {
+                "frames": [
+                    {
+                        "function": "main",
+                        "module": "app.main",
+                        "filename": "main.py",
+                        "lineno": 10,
+                        "in_app": True,
+                    }
+                ],
+                "stacks": [[0], [0]],  # Two stacks with the same frame
+                "samples": [
+                    {"stack_id": 0, "thread_id": "1"},
+                    {"stack_id": 1, "thread_id": "1"},
+                ],
+                "thread_metadata": {"1": {"name": "MainThread"}},
+            }
+        }
+
+        execution_tree = GroupAutofixEndpoint()._convert_profile_to_execution_tree(profile_data)
+
+        # Should only have one node even though frame appears in multiple samples
+        assert len(execution_tree) == 1
+        assert execution_tree[0]["function"] == "main"
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    def test_get_profile_for_event(self, mock_get_from_profiling_service):
+        # Create a test event with transaction and trace data
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "transaction": "test_transaction",
+                "contexts": {
+                    "trace": {
+                        "trace_id": "a" * 32,
+                        "span_id": "a" * 16,
+                    }
+                },
+            },
+            project_id=self.project.id,
+        )
+
+        # Mock the profile service response
+        mock_get_from_profiling_service.return_value.status = 200
+        mock_get_from_profiling_service.return_value.data = b"""{
+            "profile": {
+                "frames": [
+                    {
+                        "function": "main",
+                        "module": "app.main",
+                        "filename": "main.py",
+                        "lineno": 10,
+                        "in_app": true
+                    }
+                ],
+                "stacks": [[0]],
+                "samples": [{"stack_id": 0, "thread_id": "1"}],
+                "thread_metadata": {"1": {"name": "MainThread"}}
+            }
+        }"""
+
+        timestamp = before_now(minutes=1)
+        profile_id = "0" * 32
+        # Create a transaction event with profile_id
+        self.store_event(
+            data={
+                "type": "transaction",
+                "transaction": "test_transaction",
+                "contexts": {
+                    "trace": {
+                        "trace_id": "a" * 32,
+                        "span_id": "b" * 16,
+                    },
+                    "profile": {"profile_id": profile_id},
+                },
+                "spans": [
+                    {
+                        "span_id": "a" * 16,
+                        "trace_id": "a" * 32,
+                        "op": "test",
+                        "description": "test span",
+                        "start_timestamp": timestamp.timestamp(),
+                        "timestamp": (timestamp + timedelta(seconds=1)).timestamp(),
+                    }
+                ],
+                "start_timestamp": timestamp.timestamp(),
+                "timestamp": (timestamp + timedelta(seconds=1)).timestamp(),
+            },
+            project_id=self.project.id,
+        )
+
+        profile = GroupAutofixEndpoint()._get_profile_for_event(event, self.project)
+
+        # Verify profile was fetched and processed correctly
+        assert profile is not None
+        assert profile["profile_matches_issue"] is True
+        assert len(profile["execution_tree"]) == 1
+        assert profile["execution_tree"][0]["function"] == "main"
+        assert profile["execution_tree"][0]["module"] == "app.main"
+        assert profile["execution_tree"][0]["filename"] == "main.py"
+        assert profile["execution_tree"][0]["lineno"] == 10
+
+        # Verify profiling service was called with correct parameters
+        mock_get_from_profiling_service.assert_called_once_with(
+            "GET",
+            f"/organizations/{self.project.organization_id}/projects/{self.project.id}/profiles/{profile_id}",
+            params={"format": "sample"},
+        )
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    def test_get_profile_for_event_no_matching_transaction(self, mock_get_from_profiling_service):
+        # Create a test event with transaction and trace data but no matching transaction event
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "transaction": "test_transaction",
+                "contexts": {
+                    "trace": {
+                        "trace_id": "a" * 32,
+                        "span_id": "a" * 16,
+                    }
+                },
+            },
+            project_id=self.project.id,
+        )
+
+        profile = GroupAutofixEndpoint()._get_profile_for_event(event, self.project)
+
+        # Verify no profile was returned when no matching transaction is found
+        assert profile is None
+        mock_get_from_profiling_service.assert_not_called()
+
+    @patch("sentry.api.endpoints.group_ai_autofix.get_from_profiling_service")
+    def test_get_profile_for_event_profile_service_error(self, mock_get_from_profiling_service):
+        # Create test event and transaction
+        data = load_data("python", timestamp=before_now(minutes=1))
+        event = self.store_event(
+            data={
+                **data,
+                "transaction": "test_transaction",
+                "contexts": {
+                    "trace": {
+                        "trace_id": "a" * 32,
+                        "span_id": "a" * 16,
+                    }
+                },
+            },
+            project_id=self.project.id,
+        )
+
+        timestamp = before_now(minutes=1)
+        profile_id = "0" * 32
+        self.store_event(
+            data={
+                "type": "transaction",
+                "transaction": "test_transaction",
+                "contexts": {
+                    "trace": {
+                        "trace_id": "a" * 32,
+                        "span_id": "b" * 16,
+                    },
+                    "profile": {"profile_id": profile_id},
+                },
+                "spans": [
+                    {
+                        "span_id": "a" * 16,
+                        "trace_id": "a" * 32,
+                        "op": "test",
+                        "description": "test span",
+                        "start_timestamp": timestamp.timestamp(),
+                        "timestamp": (timestamp + timedelta(seconds=1)).timestamp(),
+                    }
+                ],
+                "start_timestamp": timestamp.timestamp(),
+                "timestamp": (timestamp + timedelta(seconds=1)).timestamp(),
+            },
+            project_id=self.project.id,
+        )
+
+        # Mock profile service error response
+        mock_get_from_profiling_service.return_value.status = 500
+
+        profile = GroupAutofixEndpoint()._get_profile_for_event(event, self.project)
+
+        # Verify no profile is returned on service error
+        assert profile is None

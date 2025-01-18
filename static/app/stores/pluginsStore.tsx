@@ -1,7 +1,7 @@
 import type {StoreDefinition} from 'reflux';
 import {createStore} from 'reflux';
 
-import type {Plugin} from 'sentry/types';
+import type {Plugin} from 'sentry/types/integrations';
 
 interface InternalDefinition {
   plugins: Map<string, Plugin> | null;
@@ -17,7 +17,7 @@ interface InternalDefinition {
 interface PluginStoreDefinition extends StoreDefinition, InternalDefinition {
   getState: () => InternalDefinition['state'];
   onFetchAll: (options?: {resetLoading?: boolean}) => void;
-  onFetchAllError: (err) => void;
+  onFetchAllError: (err: any) => void;
 
   onFetchAllSuccess: (data: Plugin[], links: {pageLinks?: string}) => void;
   onUpdate: (id: string, updateObj: Partial<Plugin>) => void;

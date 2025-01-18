@@ -12,7 +12,8 @@ import FormField from 'sentry/components/forms/formField';
 import {IconAdd, IconDelete} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import {defined, objectIsEmpty} from 'sentry/utils';
+import {defined} from 'sentry/utils';
+import {isEmptyObject} from 'sentry/utils/object/isEmptyObject';
 
 // XXX(epurkhiser): This is wrong, it should not be inheriting these props
 import type {InputFieldProps} from './inputField';
@@ -108,7 +109,7 @@ export interface ChoiceMapperFieldProps
 export default class ChoiceMapperField extends Component<ChoiceMapperFieldProps> {
   static defaultProps = defaultProps;
 
-  hasValue = (value: InputFieldProps['value']) => defined(value) && !objectIsEmpty(value);
+  hasValue = (value: InputFieldProps['value']) => defined(value) && !isEmptyObject(value);
 
   renderField = (props: ChoiceMapperFieldProps) => {
     const {
@@ -147,7 +148,6 @@ export default class ChoiceMapperField extends Component<ChoiceMapperFieldProps>
     };
 
     const removeRow = (itemKey: string) => {
-      // eslint-disable-next-line no-unused-vars
       saveChanges(
         Object.fromEntries(Object.entries(value).filter(([key, _]) => key !== itemKey))
       );
@@ -219,11 +219,11 @@ export default class ChoiceMapperField extends Component<ChoiceMapperFieldProps>
                 <Control>
                   <SelectControl
                     {...(perItemMapping
-                      ? mappedSelectors[itemKey][fieldKey]
+                      ? mappedSelectors[itemKey]![fieldKey]
                       : mappedSelectors[fieldKey])}
                     height={30}
                     disabled={disabled}
-                    onChange={v => setValue(itemKey, fieldKey, v ? v.value : null)}
+                    onChange={(v: any) => setValue(itemKey, fieldKey, v ? v.value : null)}
                     value={value[itemKey][fieldKey]}
                   />
                 </Control>
@@ -250,7 +250,7 @@ export default class ChoiceMapperField extends Component<ChoiceMapperFieldProps>
     return (
       <FormField
         {...this.props}
-        inline={({model}) => !this.hasValue(model.getValue(this.props.name))}
+        inline={({model}: any) => !this.hasValue(model.getValue(this.props.name))}
       >
         {this.renderField}
       </FormField>

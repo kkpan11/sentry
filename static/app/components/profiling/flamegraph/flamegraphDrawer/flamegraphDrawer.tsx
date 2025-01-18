@@ -23,7 +23,7 @@ import {invertCallTree} from 'sentry/utils/profiling/profile/utils';
 import {useLocalStorageState} from 'sentry/utils/useLocalStorageState';
 import useOrganization from 'sentry/utils/useOrganization';
 import {useParams} from 'sentry/utils/useParams';
-import {useProfileTransaction} from 'sentry/views/profiling/profilesProvider';
+import type {useProfileTransaction} from 'sentry/views/profiling/profilesProvider';
 
 import {FlamegraphTreeTable} from './flamegraphTreeTable';
 import {ProfileDetails} from './profileDetails';
@@ -35,6 +35,7 @@ interface FlamegraphDrawerProps {
   formatDuration: Flamegraph['formatter'];
   getFrameColor: (frame: FlamegraphFrame) => string;
   profileGroup: ProfileGroup;
+  profileTransaction: ReturnType<typeof useProfileTransaction> | null;
   referenceNode: FlamegraphFrame;
   rootNodes: FlamegraphFrame[];
   onResize?: MouseEventHandler<HTMLElement>;
@@ -46,7 +47,6 @@ const FlamegraphDrawer = memo(function FlamegraphDrawer(props: FlamegraphDrawerP
   const orgSlug = useOrganization().slug;
   const flamegraphPreferences = useFlamegraphPreferences();
   const dispatch = useDispatchFlamegraphState();
-  const profileTransaction = useProfileTransaction();
 
   const [tab, setTab] = useLocalStorageState<'bottom up' | 'top down'>(
     'profiling-drawer-view',
@@ -254,14 +254,17 @@ const FlamegraphDrawer = memo(function FlamegraphDrawer(props: FlamegraphDrawerP
         canvasScheduler={props.canvasScheduler}
         canvasPoolManager={props.canvasPoolManager}
       />
-
-      <ProfileDetails
-        transaction={
-          profileTransaction.type === 'resolved' ? profileTransaction.data : null
-        }
-        projectId={params.projectId}
-        profileGroup={props.profileGroup}
-      />
+      {props.profileGroup.type === 'transaction' ? (
+        <ProfileDetails
+          transaction={
+            props.profileTransaction && props.profileTransaction.type === 'resolved'
+              ? props.profileTransaction.data
+              : null
+          }
+          projectId={params.projectId!}
+          profileGroup={props.profileGroup}
+        />
+      ) : null}
 
       {flamegraphPreferences.layout === 'table left' ||
       flamegraphPreferences.layout === 'table right' ? (
@@ -301,7 +304,7 @@ const FrameDrawerLabel = styled('label')`
   white-space: nowrap;
   margin-bottom: 0;
   height: 100%;
-  font-weight: normal;
+  font-weight: ${p => p.theme.fontWeightNormal};
   gap: ${space(0.5)};
 `;
 
@@ -365,14 +368,14 @@ export const ProfilingDetailsListItem = styled('li')<{
     border-bottom: 2px solid transparent;
     border-radius: 0;
     margin: 0;
-    padding: ${p => (p.size === 'sm' ? space(0.25) : space(0.5))} 0;
+    padding: ${space(0.5)} 0;
     color: ${p => p.theme.textColor};
-    max-height: ${p => (p.size === 'sm' ? '24px' : 'auto')};
+    max-height: auto;
 
     &::after {
       display: block;
       content: attr(data-title);
-      font-weight: bold;
+      font-weight: ${p => p.theme.fontWeightBold};
       height: 1px;
       color: transparent;
       overflow: hidden;
@@ -386,7 +389,7 @@ export const ProfilingDetailsListItem = styled('li')<{
   }
 
   &.active button {
-    font-weight: bold;
+    font-weight: ${p => p.theme.fontWeightBold};
     border-bottom: 2px solid ${prop => prop.theme.active};
   }
 `;
@@ -397,6 +400,7 @@ const StyledButton = styled(Button)<{active: boolean}>`
   box-shadow: none;
   transition: none !important;
   opacity: ${p => (p.active ? 0.7 : 0.5)};
+  line-height: 26px;
 
   &:not(:last-child) {
     margin-right: ${space(1)};

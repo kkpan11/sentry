@@ -1,10 +1,10 @@
 import * as Sentry from '@sentry/react';
 import merge from 'lodash/merge';
-import moment from 'moment';
-import type {LocationRange} from 'pegjs';
+import moment from 'moment-timezone';
+import type {LocationRange} from 'peggy';
 
 import {t} from 'sentry/locale';
-import type {TagCollection} from 'sentry/types';
+import type {TagCollection} from 'sentry/types/group';
 import {
   isMeasurement,
   isSpanOperationBreakdownField,
@@ -21,14 +21,15 @@ type ListItem<V> = [
   space: ReturnType<TokenConverter['tokenSpaces']>,
   comma: string,
   space: ReturnType<TokenConverter['tokenSpaces']>,
-  notComma: undefined,
-  value: V | null,
+  value?: [notComma: undefined, value: V | null],
 ];
 
-const listJoiner = <K,>([s1, comma, s2, _, value]: ListItem<K>) => ({
-  separator: [s1.value, comma, s2.value].join(''),
-  value,
-});
+const listJoiner = <K,>([s1, comma, s2, value]: ListItem<K>) => {
+  return {
+    separator: [s1.value, comma, s2.value].join(''),
+    value: value ? value[1] : null,
+  };
+};
 
 /**
  * A token represents a node in the syntax tree. These are all extrapolated
@@ -42,9 +43,13 @@ export enum Token {
   LOGIC_BOOLEAN = 'logicBoolean',
   KEY_SIMPLE = 'keySimple',
   KEY_EXPLICIT_TAG = 'keyExplicitTag',
+  KEY_EXPLICIT_NUMBER_TAG = 'keyExplicitNumberTag',
+  KEY_EXPLICIT_STRING_TAG = 'keyExplicitStringTag',
   KEY_AGGREGATE = 'keyAggregate',
   KEY_AGGREGATE_ARGS = 'keyAggregateArgs',
   KEY_AGGREGATE_PARAMS = 'keyAggregateParam',
+  L_PAREN = 'lParen',
+  R_PAREN = 'rParen',
   VALUE_ISO_8601_DATE = 'valueIso8601Date',
   VALUE_RELATIVE_DATE = 'valueRelativeDate',
   VALUE_DURATION = 'valueDuration',
@@ -124,13 +129,11 @@ export const interchangeableFilterOperators = {
   [FilterType.DATE]: [FilterType.SPECIFIC_DATE],
 };
 
-const textKeys = [Token.KEY_SIMPLE, Token.KEY_EXPLICIT_TAG] as const;
-
-const numberUnits = {
-  b: 1_000_000_000,
-  m: 1_000_000,
-  k: 1_000,
-};
+const textKeys = [
+  Token.KEY_SIMPLE,
+  Token.KEY_EXPLICIT_TAG,
+  Token.KEY_EXPLICIT_STRING_TAG,
+] as const;
 
 /**
  * This constant-type configuration object declares how each filter type
@@ -149,7 +152,7 @@ export const filterTypeConfig = {
   },
   [FilterType.TEXT_IN]: {
     validKeys: textKeys,
-    validOps: [],
+    validOps: basicOperators,
     validValues: [Token.VALUE_TEXT_LIST],
     canNegate: true,
   },
@@ -191,7 +194,7 @@ export const filterTypeConfig = {
   },
   [FilterType.NUMERIC_IN]: {
     validKeys: [Token.KEY_SIMPLE],
-    validOps: [],
+    validOps: basicOperators,
     validValues: [Token.VALUE_NUMBER_LIST],
     canNegate: true,
   },
@@ -263,15 +266,18 @@ export enum InvalidReason {
   WILDCARD_NOT_ALLOWED = 'wildcard-not-allowed',
   LOGICAL_OR_NOT_ALLOWED = 'logic-or-not-allowed',
   LOGICAL_AND_NOT_ALLOWED = 'logic-and-not-allowed',
+  NEGATION_NOT_ALLOWED = 'negation-not-allowed',
   MUST_BE_QUOTED = 'must-be-quoted',
   FILTER_MUST_HAVE_VALUE = 'filter-must-have-value',
   INVALID_BOOLEAN = 'invalid-boolean',
   INVALID_FILE_SIZE = 'invalid-file-size',
   INVALID_NUMBER = 'invalid-number',
   EMPTY_VALUE_IN_LIST_NOT_ALLOWED = 'empty-value-in-list-not-allowed',
+  EMPTY_PARAMETER_NOT_ALLOWED = 'empty-parameter-not-allowed',
   INVALID_KEY = 'invalid-key',
   INVALID_DURATION = 'invalid-duration',
   INVALID_DATE_FORMAT = 'invalid-date-format',
+  PARENS_NOT_ALLOWED = 'parens-not-allowed',
 }
 
 /**
@@ -333,6 +339,13 @@ type FilterMap = {
 
 type TextFilter = FilterMap[FilterType.TEXT];
 type InFilter = FilterMap[FilterType.TEXT_IN] | FilterMap[FilterType.NUMERIC_IN];
+type AggregateFilterType =
+  | FilterMap[FilterType.AGGREGATE_DATE]
+  | FilterMap[FilterType.AGGREGATE_DURATION]
+  | FilterMap[FilterType.AGGREGATE_NUMERIC]
+  | FilterMap[FilterType.AGGREGATE_PERCENTAGE]
+  | FilterMap[FilterType.AGGREGATE_RELATIVE_DATE]
+  | FilterMap[FilterType.AGGREGATE_SIZE];
 
 /**
  * The Filter type discriminates on the FilterType enum using the `filter` key.
@@ -411,7 +424,7 @@ export class TokenConverter {
       value,
       negated,
       operator: operator ?? TermOperator.DEFAULT,
-      invalid: this.checkInvalidFilter(filter, key, value),
+      invalid: this.checkInvalidFilter(filter, key, value, negated),
       warning: this.checkFilterWarning(key),
     } as FilterResult;
 
@@ -420,6 +433,20 @@ export class TokenConverter {
       ...filterToken,
     };
   };
+
+  tokenLParen = (value: '(') => ({
+    ...this.defaultTokenFields,
+    type: Token.L_PAREN as const,
+    value,
+    invalid: this.checkInvalidParen(),
+  });
+
+  tokenRParen = (value: ')') => ({
+    ...this.defaultTokenFields,
+    type: Token.R_PAREN as const,
+    value,
+    invalid: this.checkInvalidParen(),
+  });
 
   tokenFreeText = (value: string, quoted: boolean) => ({
     ...this.defaultTokenFields,
@@ -465,6 +492,26 @@ export class TokenConverter {
     key,
   });
 
+  tokenKeyExplicitStringTag = (
+    prefix: string,
+    key: ReturnType<TokenConverter['tokenKeySimple']>
+  ) => ({
+    ...this.defaultTokenFields,
+    type: Token.KEY_EXPLICIT_STRING_TAG as const,
+    prefix,
+    key,
+  });
+
+  tokenKeyExplicitNumberTag = (
+    prefix: string,
+    key: ReturnType<TokenConverter['tokenKeySimple']>
+  ) => ({
+    ...this.defaultTokenFields,
+    type: Token.KEY_EXPLICIT_NUMBER_TAG as const,
+    prefix,
+    key,
+  });
+
   tokenKeyAggregateParam = (value: string, quoted: boolean) => ({
     ...this.defaultTokenFields,
     type: Token.KEY_AGGREGATE_PARAMS as const,
@@ -489,16 +536,27 @@ export class TokenConverter {
   tokenKeyAggregateArgs = (
     arg1: ReturnType<TokenConverter['tokenKeyAggregateParam']>,
     args: ListItem<ReturnType<TokenConverter['tokenKeyAggregateParam']>>[]
+  ) => {
+    return {
+      ...this.defaultTokenFields,
+      type: Token.KEY_AGGREGATE_ARGS as const,
+      args: [{separator: '', value: arg1}, ...args.map(listJoiner)],
+    };
+  };
+
+  tokenValueIso8601Date = (
+    value: string,
+    date: Array<string | string[]>,
+    time?: Array<string | string[] | Array<string[]>>,
+    tz?: Array<string | string[]>
   ) => ({
     ...this.defaultTokenFields,
-    type: Token.KEY_AGGREGATE_ARGS as const,
-    args: [{separator: '', value: arg1}, ...args.map(listJoiner)],
-  });
-
-  tokenValueIso8601Date = (value: string) => ({
-    ...this.defaultTokenFields,
     type: Token.VALUE_ISO_8601_DATE as const,
-    value: moment(value),
+    value,
+    parsed: this.config.parse ? parseDate(value) : undefined,
+    date: date.flat().join(''),
+    time: Array.isArray(time) ? time.flat().flat().join('').replace('T', '') : time,
+    tz: Array.isArray(tz) ? tz.flat().join('') : tz,
   });
 
   tokenValueRelativeDate = (
@@ -508,7 +566,8 @@ export class TokenConverter {
   ) => ({
     ...this.defaultTokenFields,
     type: Token.VALUE_RELATIVE_DATE as const,
-    value: Number(value),
+    value,
+    parsed: this.config.parse ? parseRelativeDate(value, {unit, sign}) : undefined,
     sign,
     unit,
   });
@@ -520,12 +579,14 @@ export class TokenConverter {
     ...this.defaultTokenFields,
 
     type: Token.VALUE_DURATION as const,
-    value: Number(value),
+    value,
+    parsed: this.config.parse ? parseDuration(value, unit) : undefined,
     unit,
   });
 
   tokenValueSize = (
     value: string,
+    // warning: size units are case insensitive, this type is incomplete
     unit:
       | 'bit'
       | 'nb'
@@ -548,31 +609,37 @@ export class TokenConverter {
       | 'yib'
   ) => ({
     ...this.defaultTokenFields,
-
     type: Token.VALUE_SIZE as const,
-    value: Number(value),
+    value,
+    // units are case insensitive, normalize them in their parsed representation
+    // so that we dont have to compare all possible permutations.
+    parsed: this.config.parse ? parseSize(value, unit) : undefined,
     unit,
   });
 
   tokenValuePercentage = (value: string) => ({
     ...this.defaultTokenFields,
     type: Token.VALUE_PERCENTAGE as const,
-    value: Number(value),
+    value,
+    parsed: this.config.parse ? parsePercentage(value) : undefined,
   });
 
   tokenValueBoolean = (value: string) => ({
     ...this.defaultTokenFields,
     type: Token.VALUE_BOOLEAN as const,
-    value: ['1', 'true'].includes(value.toLowerCase()),
+    value,
+    parsed: this.config.parse ? parseBoolean(value) : undefined,
   });
 
-  tokenValueNumber = (value: string, unit: string) => ({
-    ...this.defaultTokenFields,
-    type: Token.VALUE_NUMBER as const,
-    value,
-    rawValue: Number(value) * (numberUnits[unit] ?? 1),
-    unit,
-  });
+  tokenValueNumber = (value: string, unit: 'k' | 'm' | 'b' | 'K' | 'M' | 'B') => {
+    return {
+      ...this.defaultTokenFields,
+      type: Token.VALUE_NUMBER as const,
+      value,
+      unit,
+      parsed: this.config.parse ? parseNumber(value, unit) : undefined,
+    };
+  };
 
   tokenValueNumberList = (
     item1: ReturnType<TokenConverter['tokenValueNumber']>,
@@ -613,7 +680,6 @@ export class TokenConverter {
    * [0]:https://pegjs.org/documentation
    */
   predicateFilter = <T extends FilterType>(type: T, key: FilterMap[T]['key']) => {
-    // @ts-expect-error Unclear why this isn’t resolving correctly
     const keyName = getKeyName(key);
     const aggregateKey = key as ReturnType<TokenConverter['tokenKeyAggregate']>;
 
@@ -663,6 +729,14 @@ export class TokenConverter {
     this.config.textOperatorKeys.has(getKeyName(key));
 
   /**
+   * When flattenParenGroups is enabled, paren groups should not be parsed,
+   * instead parsing the parens and inner group as individual tokens.
+   */
+  predicateParenGroup = (): boolean => {
+    return !this.config.flattenParenGroups;
+  };
+
+  /**
    * Checks the validity of a free text based on the provided search configuration
    */
   checkInvalidFreeText = (value: string) => {
@@ -705,14 +779,43 @@ export class TokenConverter {
   };
 
   /**
+   * Checks the validity of a parens based on the provided search configuration
+   */
+  checkInvalidParen = () => {
+    if (!this.config.disallowParens) {
+      return null;
+    }
+
+    return {
+      type: InvalidReason.PARENS_NOT_ALLOWED,
+      reason: this.config.invalidMessages[InvalidReason.PARENS_NOT_ALLOWED],
+    };
+  };
+
+  /**
    * Checks a filter against some non-grammar validation rules
    */
   checkFilterWarning = <T extends FilterType>(key: FilterMap[T]['key']) => {
-    if (![Token.KEY_SIMPLE, Token.KEY_EXPLICIT_TAG].includes(key.type)) {
+    if (
+      ![
+        Token.KEY_SIMPLE,
+        Token.KEY_EXPLICIT_TAG,
+        Token.KEY_AGGREGATE,
+        Token.KEY_EXPLICIT_NUMBER_TAG,
+        Token.KEY_EXPLICIT_STRING_TAG,
+      ].includes(key.type)
+    ) {
       return null;
     }
+
     const keyName = getKeyName(
-      key as TokenResult<Token.KEY_SIMPLE | Token.KEY_EXPLICIT_TAG>
+      key as TokenResult<
+        | Token.KEY_SIMPLE
+        | Token.KEY_EXPLICIT_TAG
+        | Token.KEY_AGGREGATE
+        | Token.KEY_EXPLICIT_NUMBER_TAG
+        | Token.KEY_EXPLICIT_STRING_TAG
+      >
     );
     return this.config.getFilterTokenWarning?.(keyName) ?? null;
   };
@@ -723,18 +826,26 @@ export class TokenConverter {
   checkInvalidFilter = <T extends FilterType>(
     filter: T,
     key: FilterMap[T]['key'],
-    value: FilterMap[T]['value']
+    value: FilterMap[T]['value'],
+    negated: FilterMap[T]['negated']
   ) => {
     // Text filter is the "fall through" filter that will match when other
     // filter predicates fail.
     if (
       this.config.validateKeys &&
       this.config.supportedTags &&
-      !this.config.supportedTags[key.text]
+      !this.config.supportedTags[getKeyName(key)]
     ) {
       return {
         type: InvalidReason.INVALID_KEY,
         reason: t('Invalid key. "%s" is not a supported search key.', key.text),
+      };
+    }
+
+    if (this.config.disallowNegation && negated) {
+      return {
+        type: InvalidReason.NEGATION_NOT_ALLOWED,
+        reason: this.config.invalidMessages[InvalidReason.NEGATION_NOT_ALLOWED],
       };
     }
 
@@ -753,6 +864,10 @@ export class TokenConverter {
       return this.checkInvalidInFilter(value as InFilter['value']);
     }
 
+    if ('name' in key) {
+      return this.checkInvalidAggregateKey(key);
+    }
+
     return null;
   };
 
@@ -761,7 +876,10 @@ export class TokenConverter {
    */
   checkInvalidTextFilter = (key: TextFilter['key'], value: TextFilter['value']) => {
     // Explicit tag keys will always be treated as text filters
-    if (key.type === Token.KEY_EXPLICIT_TAG) {
+    if (
+      key.type === Token.KEY_EXPLICIT_TAG ||
+      key.type === Token.KEY_EXPLICIT_STRING_TAG
+    ) {
       return this.checkInvalidTextValue(value);
     }
 
@@ -867,6 +985,7 @@ export class TokenConverter {
 
     if (
       this.config.disallowWildcard &&
+      // @ts-ignore TS(2531): Object is possibly 'null'.
       items.some(item => item.value.value.includes('*'))
     ) {
       return {
@@ -877,6 +996,223 @@ export class TokenConverter {
 
     return null;
   };
+
+  checkInvalidAggregateKey = (key: AggregateFilterType['key']) => {
+    const hasEmptyParameter = key.args?.args.some(arg => arg.value === null);
+
+    if (hasEmptyParameter) {
+      return {
+        type: InvalidReason.EMPTY_PARAMETER_NOT_ALLOWED,
+        reason: this.config.invalidMessages[InvalidReason.EMPTY_PARAMETER_NOT_ALLOWED],
+      };
+    }
+
+    return null;
+  };
+}
+
+function parseDate(input: string): {value: Date} {
+  const date = moment(input).toDate();
+
+  if (isNaN(date.getTime())) {
+    throw new Error('Invalid date');
+  }
+
+  return {value: date};
+}
+
+function parseRelativeDate(
+  input: string,
+  {sign, unit}: {sign: '-' | '+'; unit: string}
+): {value: Date} {
+  let date = new Date().getTime();
+  const number = numeric(input);
+
+  if (isNaN(date)) {
+    throw new Error('Invalid date');
+  }
+
+  let offset: number | undefined;
+  switch (unit) {
+    case 'm':
+      offset = number * 1000 * 60;
+      break;
+    case 'h':
+      offset = number * 1000 * 60 * 60;
+      break;
+    case 'd':
+      offset = number * 1000 * 60 * 60 * 24;
+      break;
+    case 'w':
+      offset = number * 1000 * 60 * 60 * 24 * 7;
+      break;
+    default:
+      throw new Error('Invalid unit');
+  }
+
+  if (offset === undefined) {
+    throw new Error('Unreachable');
+  }
+
+  date = sign === '-' ? date - offset : date + offset;
+  return {value: new Date(date)};
+}
+
+// The parser supports floats and ints, parseFloat handles both.
+function numeric(input: string) {
+  const number = parseFloat(input);
+  if (isNaN(number)) {
+    throw new Error('Invalid number');
+  }
+  return number;
+}
+
+function parseDuration(
+  input: string,
+  unit: 'ms' | 's' | 'min' | 'm' | 'hr' | 'h' | 'day' | 'd' | 'wk' | 'w'
+): {value: number} {
+  let number = numeric(input);
+
+  switch (unit) {
+    case 'ms':
+      break;
+    case 's':
+      number *= 1e3;
+      break;
+    case 'min':
+    case 'm':
+      number *= 1e3 * 60;
+      break;
+    case 'hr':
+    case 'h':
+      number *= 1e3 * 60 * 60;
+      break;
+    case 'day':
+    case 'd':
+      number *= 1e3 * 60 * 60 * 24;
+      break;
+    case 'wk':
+    case 'w':
+      number *= 1e3 * 60 * 60 * 24 * 7;
+      break;
+    default:
+      throw new Error('Invalid unit');
+  }
+
+  return {
+    value: number,
+  };
+}
+function parseNumber(
+  input: string,
+  unit: 'k' | 'm' | 'b' | 'K' | 'M' | 'B'
+): {value: number} {
+  let number = numeric(input);
+
+  switch (unit) {
+    case 'K':
+    case 'k':
+      number = number * 1e3;
+      break;
+    case 'M':
+    case 'm':
+      number = number * 1e6;
+      break;
+    case 'B':
+    case 'b':
+      number = number * 1e9;
+      break;
+    case null:
+    case undefined:
+      break;
+    default:
+      throw new Error('Invalid unit');
+  }
+
+  return {value: number};
+}
+function parseSize(input: string, unit: string): {value: number} {
+  if (!unit) {
+    unit = 'bytes';
+  }
+
+  let number = numeric(input);
+
+  // parser is case insensitive to units
+  switch (unit.toLowerCase()) {
+    case 'bit':
+      number /= 8;
+      break;
+    case 'nb':
+      number /= 2;
+      break;
+    case 'bytes':
+      break;
+    case 'kb':
+      number *= 1000;
+      break;
+    case 'mb':
+      number *= 1000 ** 2;
+      break;
+    case 'gb':
+      number *= 1000 ** 3;
+      break;
+    case 'tb':
+      number *= 1000 ** 4;
+      break;
+    case 'pb':
+      number *= 1000 ** 5;
+      break;
+    case 'eb':
+      number *= 1000 ** 6;
+      break;
+    case 'zb':
+      number *= 1000 ** 7;
+      break;
+    case 'yb':
+      number *= 1000 ** 8;
+      break;
+    case 'kib':
+      number *= 1024;
+      break;
+    case 'mib':
+      number *= 1024 ** 2;
+      break;
+    case 'gib':
+      number *= 1024 ** 3;
+      break;
+    case 'tib':
+      number *= 1024 ** 4;
+      break;
+    case 'pib':
+      number *= 1024 ** 5;
+      break;
+    case 'eib':
+      number *= 1024 ** 6;
+      break;
+    case 'zib':
+      number *= 1024 ** 7;
+      break;
+    case 'yib':
+      number *= 1024 ** 8;
+      break;
+    default:
+      throw new Error('Invalid unit');
+  }
+
+  return {value: number};
+}
+function parsePercentage(input: string): {value: number} {
+  return {value: numeric(input)};
+}
+function parseBoolean(input: string): {value: boolean} {
+  if (/^true$/i.test(input) || input === '1') {
+    return {value: true};
+  }
+  if (/^false$/i.test(input) || input === '0') {
+    return {value: false};
+  }
+  throw new Error('Invalid boolean');
 }
 
 /**
@@ -905,16 +1241,24 @@ type KVConverter<T extends Token> = ConverterResultMap[KVTokens] & {type: T};
  */
 export type TokenResult<T extends Token> = ConverterResultMap[Converter] & {type: T};
 
-/**
- * Result from parsing a search query.
- */
-export type ParseResult = Array<
+export type ParseResultToken =
   | TokenResult<Token.LOGIC_BOOLEAN>
   | TokenResult<Token.LOGIC_GROUP>
   | TokenResult<Token.FILTER>
   | TokenResult<Token.FREE_TEXT>
   | TokenResult<Token.SPACES>
->;
+  | TokenResult<Token.L_PAREN>
+  | TokenResult<Token.R_PAREN>;
+
+/**
+ * Result from parsing a search query.
+ */
+export type ParseResult = ParseResultToken[];
+
+export type AggregateFilter = AggregateFilterType & {
+  location: LocationRange;
+  text: string;
+};
 
 /**
  * Configures behavior of search parsing
@@ -932,6 +1276,14 @@ export type SearchConfig = {
    * Disallow free text search
    */
   disallowFreeText: boolean;
+  /**
+   * Disallow negation for filters
+   */
+  disallowNegation: boolean;
+  /**
+   * Disallow parens in search
+   */
+  disallowParens: boolean;
   /**
    * Disallow wildcards in free text search AND in tag values
    */
@@ -966,9 +1318,17 @@ export type SearchConfig = {
    */
   textOperatorKeys: Set<string>;
   /**
+   * When true, the parser will not parse paren groups and will return individual paren tokens
+   */
+  flattenParenGroups?: boolean;
+  /**
    * A function that returns a warning message for a given filter token key
    */
   getFilterTokenWarning?: (key: string) => React.ReactNode;
+  /**
+   * Determines if user input values should be parsed
+   */
+  parse?: boolean;
   /**
    * If validateKeys is set to true, tag keys that don't exist in supportedTags will be consider invalid
    */
@@ -1020,6 +1380,8 @@ export const defaultConfig: SearchConfig = {
   disallowedLogicalOperators: new Set(),
   disallowFreeText: false,
   disallowWildcard: false,
+  disallowNegation: false,
+  disallowParens: false,
   invalidMessages: {
     [InvalidReason.FREE_TEXT_NOT_ALLOWED]: t('Free text is not supported in this search'),
     [InvalidReason.WILDCARD_NOT_ALLOWED]: t('Wildcards not supported in search'),
@@ -1030,6 +1392,7 @@ export const defaultConfig: SearchConfig = {
       'The AND operator is not allowed in this search'
     ),
     [InvalidReason.MUST_BE_QUOTED]: t('Quotes must enclose text or be escaped'),
+    [InvalidReason.NEGATION_NOT_ALLOWED]: t('Negation is not allowed in this search.'),
     [InvalidReason.FILTER_MUST_HAVE_VALUE]: t('Filter must have a value'),
     [InvalidReason.INVALID_BOOLEAN]: t('Invalid boolean. Expected true, 1, false, or 0.'),
     [InvalidReason.INVALID_FILE_SIZE]: t(
@@ -1038,9 +1401,13 @@ export const defaultConfig: SearchConfig = {
     [InvalidReason.INVALID_NUMBER]: t(
       'Invalid number. Expected number then optional k, m, or b suffix (e.g. 500k)'
     ),
+    [InvalidReason.EMPTY_PARAMETER_NOT_ALLOWED]: t(
+      'Function parameters should not have empty values'
+    ),
     [InvalidReason.EMPTY_VALUE_IN_LIST_NOT_ALLOWED]: t(
       'Lists should not have empty values'
     ),
+    [InvalidReason.PARENS_NOT_ALLOWED]: t('Parentheses are not supported in this search'),
   },
 };
 
@@ -1100,7 +1467,7 @@ export function joinQuery(
   return (
     (leadingSpace ? ' ' : '') +
     (parsedTerms.length === 1
-      ? parsedTerms[0].text
+      ? parsedTerms[0]!.text
       : parsedTerms.map(p => p.text).join(additionalSpaceBetween ? ' ' : ''))
   );
 }

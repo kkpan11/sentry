@@ -1,15 +1,13 @@
 from sentry_kafka_schemas.schema_types.group_attributes_v1 import GroupAttributesSnapshot
-from sentry_sdk import Hub
 from snuba_sdk.legacy import json_to_snql
 
 from sentry.issues.attributes import (
+    _bulk_retrieve_group_values,
     _bulk_retrieve_snapshot_values,
-    _retrieve_group_values,
     produce_snapshot_to_kafka,
 )
 from sentry.testutils.cases import SnubaTestCase, TestCase
-from sentry.utils import json
-from sentry.utils.snuba import _snql_query
+from sentry.utils.snuba import raw_snql_query
 
 
 class DatasetTest(SnubaTestCase, TestCase):
@@ -31,18 +29,15 @@ class DatasetTest(SnubaTestCase, TestCase):
         }
         request = json_to_snql(json_body, "group_attributes")
         request.validate()
-        identity = lambda x: x
-        resp = _snql_query(((request, identity, identity), Hub(Hub.current), {}, "test_api"))
-        assert resp[0].status == 200
-        stuff = json.loads(resp[0].data)
-
-        assert len(stuff["data"]) == 0
+        result = raw_snql_query(request)
+        assert len(result["data"]) == 0
 
     def test_insert_then_query(self) -> None:
         project = self.create_project()
         group = self.create_group(project=project)
 
-        snapshot = _bulk_retrieve_snapshot_values([_retrieve_group_values(group.id)], False)
+        group_values = _bulk_retrieve_group_values([group.id])
+        snapshot = _bulk_retrieve_snapshot_values(group_values, False)
         self._send(snapshot[0])
 
         json_body = {
@@ -62,9 +57,5 @@ class DatasetTest(SnubaTestCase, TestCase):
         }
         request = json_to_snql(json_body, "group_attributes")
         request.validate()
-        identity = lambda x: x
-        resp = _snql_query(((request, identity, identity), Hub(Hub.current), {}, "test_api"))
-        assert resp[0].status == 200
-        stuff = json.loads(resp[0].data)
-
-        assert len(stuff["data"]) == 1
+        result = raw_snql_query(request)
+        assert len(result["data"]) == 1

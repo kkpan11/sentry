@@ -1,16 +1,16 @@
-import {browserHistory} from 'react-router';
-import {ConfigFixture} from 'sentry-fixture/config';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 import {RouteComponentPropsFixture} from 'sentry-fixture/routeComponentPropsFixture';
+import {RouterFixture} from 'sentry-fixture/routerFixture';
 
 import {render, screen, userEvent, waitFor} from 'sentry-test/reactTestingLibrary';
 
 import {logout} from 'sentry/actionCreators/account';
+import ConfigStore from 'sentry/stores/configStore';
 import AcceptOrganizationInvite from 'sentry/views/acceptOrganizationInvite';
 
 jest.mock('sentry/actionCreators/account');
 
-const addMock = body =>
+const addMock = (body: any) =>
   MockApiClient.addMockResponse({
     url: '/accept-invite/org-slug/1/abc/',
     method: 'GET',
@@ -25,11 +25,12 @@ const getJoinButton = () => {
 };
 
 describe('AcceptOrganizationInvite', function () {
+  const router = RouterFixture();
   const organization = OrganizationFixture({slug: 'org-slug'});
-  const initialData = window.__initialData;
+  const configState = ConfigStore.getState();
 
   afterEach(() => {
-    window.__initialData = initialData;
+    ConfigStore.loadInitialData(configState);
   });
 
   it('can accept invitation', async function () {
@@ -46,7 +47,8 @@ describe('AcceptOrganizationInvite', function () {
       <AcceptOrganizationInvite
         {...RouteComponentPropsFixture()}
         params={{orgId: 'org-slug', memberId: '1', token: 'abc'}}
-      />
+      />,
+      {router}
     );
 
     const acceptMock = MockApiClient.addMockResponse({
@@ -58,20 +60,18 @@ describe('AcceptOrganizationInvite', function () {
 
     await userEvent.click(joinButton!);
     expect(acceptMock).toHaveBeenCalled();
-    expect(browserHistory.replace).toHaveBeenCalledWith('/org-slug/');
+    expect(router.replace).toHaveBeenCalledWith('/org-slug/');
   });
 
   it('can accept invitation on customer-domains', async function () {
-    window.__initialData = ConfigFixture({
-      customerDomain: {
-        subdomain: 'org-slug',
-        organizationUrl: 'https://org-slug.sentry.io',
-        sentryUrl: 'https://sentry.io',
-      },
-      links: {
-        ...(window.__initialData?.links ?? {}),
-        sentryUrl: 'https://sentry.io',
-      },
+    ConfigStore.set('customerDomain', {
+      subdomain: 'org-slug',
+      organizationUrl: 'https://org-slug.sentry.io',
+      sentryUrl: 'https://sentry.io',
+    });
+    ConfigStore.set('links', {
+      ...configState.links,
+      sentryUrl: 'https://sentry.io',
     });
 
     addMock({
@@ -87,7 +87,8 @@ describe('AcceptOrganizationInvite', function () {
       <AcceptOrganizationInvite
         {...RouteComponentPropsFixture()}
         params={{memberId: '1', token: 'abc'}}
-      />
+      />,
+      {router}
     );
 
     const acceptMock = MockApiClient.addMockResponse({
@@ -99,7 +100,28 @@ describe('AcceptOrganizationInvite', function () {
 
     await userEvent.click(joinButton!);
     expect(acceptMock).toHaveBeenCalled();
-    expect(browserHistory.replace).toHaveBeenCalledWith('/org-slug/');
+    expect(router.replace).toHaveBeenCalledWith('/org-slug/');
+  });
+
+  it('renders error message', function () {
+    MockApiClient.addMockResponse({
+      url: '/accept-invite/1/abc/',
+      method: 'GET',
+      statusCode: 400,
+      body: {detail: 'uh oh'},
+    });
+
+    render(
+      <AcceptOrganizationInvite
+        {...RouteComponentPropsFixture()}
+        params={{memberId: '1', token: 'abc'}}
+      />
+    );
+    expect(getJoinButton()).not.toBeInTheDocument();
+
+    expect(
+      screen.getByRole('link', {name: 'sign in with a different account'})
+    ).toBeInTheDocument();
   });
 
   it('requires authentication to join', function () {
@@ -247,11 +269,8 @@ describe('AcceptOrganizationInvite', function () {
     );
 
     expect(screen.getByTestId('existing-member')).toBeInTheDocument();
-
     await userEvent.click(screen.getByTestId('existing-member-link'));
-
-    expect(logout).toHaveBeenCalled();
-    await waitFor(() => expect(window.location.replace).toHaveBeenCalled());
+    await waitFor(() => expect(logout).toHaveBeenCalled());
   });
 
   it('shows right options for logged in user and optional SSO', function () {
@@ -296,9 +315,7 @@ describe('AcceptOrganizationInvite', function () {
 
     expect(screen.getByTestId('existing-member')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('existing-member-link'));
-
-    expect(logout).toHaveBeenCalled();
-    await waitFor(() => expect(window.location.replace).toHaveBeenCalled());
+    await waitFor(() => expect(logout).toHaveBeenCalled());
   });
 
   it('shows 2fa warning', function () {

@@ -1,27 +1,49 @@
 import {t} from 'sentry/locale';
-import type {MetricType, MRI, ParsedMRI, UseCase} from 'sentry/types/metrics';
+import type {
+  MetricAggregation,
+  MetricType,
+  MRI,
+  ParsedMRI,
+  UseCase,
+} from 'sentry/types/metrics';
 import {parseFunction} from 'sentry/utils/discover/fields';
 
 export const DEFAULT_MRI: MRI = 'c:custom/sentry_metric@none';
+export const DEFAULT_SPAN_MRI: MRI = 'c:custom/span_attribute_0@none';
 // This is a workaround as the alert builder requires a valid aggregate to be set
 export const DEFAULT_METRIC_ALERT_FIELD = `sum(${DEFAULT_MRI})`;
 
-export function isMRI(mri?: unknown): mri is MRI {
-  return !!parseMRI(mri);
-}
+export const DEFAULT_EAP_FIELD = 'span.duration';
+export const DEFAULT_EAP_METRICS_ALERT_FIELD = `count(${DEFAULT_EAP_FIELD})`;
 
-export function parseMRI(mri?: unknown): ParsedMRI | null {
-  if (!mri) {
-    return null;
+export function isMRI(mri?: unknown): mri is MRI {
+  if (typeof mri !== 'string') {
+    return false;
   }
   try {
-    return _parseMRI(mri as MRI);
-  } catch (e) {
-    return null;
+    _parseMRI(mri);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-function _parseMRI(mri: MRI): ParsedMRI {
+type ParseResult<T extends MRI | string | null> = T extends MRI
+  ? ParsedMRI
+  : ParsedMRI | null;
+export function parseMRI<T extends MRI | string | null>(mri?: T): ParseResult<T> {
+  if (!mri) {
+    // TODO: How can this be done without casting?
+    return null as ParseResult<T>;
+  }
+  try {
+    return _parseMRI(mri) as ParseResult<T>;
+  } catch {
+    return null as ParseResult<T>;
+  }
+}
+
+function _parseMRI(mri: string): ParsedMRI {
   const mriArray = mri.split(new RegExp(/[:/@]/));
 
   if (mriArray.length !== 4) {
@@ -32,8 +54,8 @@ function _parseMRI(mri: MRI): ParsedMRI {
 
   return {
     type: metricType as MetricType,
-    name: parseName(name, useCase as UseCase),
-    unit,
+    name: parseName(name!, useCase as UseCase),
+    unit: unit!,
     useCase: useCase as UseCase,
   };
 }
@@ -48,6 +70,13 @@ function parseName(name: string, useCase: UseCase): string {
     }
     return name;
   }
+  if (useCase === 'spans') {
+    if (['duration', 'self_time', 'exclusive_time'].includes(name)) {
+      return `span.${name}`;
+    }
+    return name;
+  }
+
   return `${useCase}.${name}`;
 }
 
@@ -56,7 +85,7 @@ export function toMRI({type, useCase, name, unit}: ParsedMRI): MRI {
 }
 
 export function formatMRI(mri: MRI): string {
-  return parseMRI(mri)?.name ?? mri;
+  return parseMRI(mri)?.name;
 }
 
 export function getUseCaseFromMRI(mri?: string): UseCase | undefined {
@@ -65,18 +94,20 @@ export function getUseCaseFromMRI(mri?: string): UseCase | undefined {
   return parsed?.useCase;
 }
 
-export function MRIToField(mri: MRI, op: string): string {
-  return `${op}(${mri})`;
+export function MRIToField(mri: MRI, aggregation: MetricAggregation): string {
+  return `${aggregation}(${mri})`;
 }
 
-export function parseField(field: string): {mri: MRI; op: string} | null {
+export function parseField(
+  field: string
+): {aggregation: MetricAggregation; mri: MRI} | null {
   const parsedFunction = parseFunction(field);
   if (!parsedFunction) {
     return null;
   }
   return {
     mri: parsedFunction.arguments[0] as MRI,
-    op: parsedFunction.name,
+    aggregation: parsedFunction.name as MetricAggregation,
   };
 }
 
@@ -102,5 +133,10 @@ export function formatMRIField(aggregate: string) {
     return aggregate;
   }
 
-  return `${parsed.op}(${formatMRI(parsed.mri)})`;
+  return `${parsed.aggregation}(${formatMRI(parsed.mri)})`;
+}
+
+export function isExtractedCustomMetric({mri}: {mri: MRI}) {
+  // Extraced metrics are prefixed with `span_attribute_`
+  return mri.substring(1).startsWith(':custom/span_attribute_');
 }

@@ -1,11 +1,10 @@
 /* global process */
 /* eslint-env node */
 /* eslint import/no-unresolved:0 */
-import fs from 'node:fs';
-import path from 'node:path';
-
 import yaml from 'js-yaml';
 import JsonRefs from 'json-refs';
+import fs from 'node:fs';
+import path from 'node:path';
 
 function dictToString(dict) {
   const res = [];
@@ -79,8 +78,8 @@ function build(originalFile, _, bundleTo) {
   );
 }
 
-let originalFile;
-let targetDirValue;
+let originalFile: any;
+let targetDirValue: any;
 
 const argv = process.argv.slice(2);
 

@@ -44,7 +44,7 @@ type OpStats = {
 
 const TOP_N_SPANS = 4;
 
-type OpBreakdownType = OpStats[];
+export type OpBreakdownType = OpStats[];
 
 type Props = {
   event: Event | AggregateEventTransaction;
@@ -373,7 +373,7 @@ function mergeInterval(intervals: TimeWindowSpan[]): TimeWindowSpan[] {
       continue;
     }
 
-    const lastInterval = merged[merged.length - 1];
+    const lastInterval = merged[merged.length - 1]!;
     const lastIntervalEnd = lastInterval[1];
 
     const [currentIntervalStart, currentIntervalEnd] = currentInterval;

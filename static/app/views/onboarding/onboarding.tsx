@@ -1,5 +1,4 @@
 import {useCallback, useContext, useEffect, useRef, useState} from 'react';
-import type {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 import type {MotionProps} from 'framer-motion';
 import {AnimatePresence, motion, useAnimation} from 'framer-motion';
@@ -14,21 +13,22 @@ import Link from 'sentry/components/links/link';
 import LogoSentry from 'sentry/components/logoSentry';
 import {OnboardingContext} from 'sentry/components/onboarding/onboardingContext';
 import {useRecentCreatedProject} from 'sentry/components/onboarding/useRecentCreatedProject';
+import Redirect from 'sentry/components/redirect';
 import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import categoryList from 'sentry/data/platformPickerCategories';
 import platforms from 'sentry/data/platforms';
 import {IconArrow} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {OnboardingSelectedSDK} from 'sentry/types';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {OnboardingSelectedSDK} from 'sentry/types/onboarding';
 import {defined} from 'sentry/utils';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import {handleXhrErrorResponse} from 'sentry/utils/handleXhrErrorResponse';
-import Redirect from 'sentry/utils/redirect';
 import testableTransition from 'sentry/utils/testableTransition';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import useApi from 'sentry/utils/useApi';
 import useOrganization from 'sentry/utils/useOrganization';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 import PageCorners from 'sentry/views/onboarding/components/pageCorners';
 
 import Stepper from './components/stepper';
@@ -82,11 +82,12 @@ function Onboarding(props: Props) {
   const onboardingSteps = getOrganizationOnboardingSteps();
   const stepObj = onboardingSteps.find(({id}) => stepId === id);
   const stepIndex = onboardingSteps.findIndex(({id}) => stepId === id);
+  const projectSlug =
+    stepObj && stepObj.id === 'setup-docs' ? selectedProjectSlug : undefined;
 
   const recentCreatedProject = useRecentCreatedProject({
     orgSlug: organization.slug,
-    projectSlug:
-      onboardingSteps[stepIndex].id === 'setup-docs' ? selectedProjectSlug : undefined,
+    projectSlug,
   });
 
   const cornerVariantTimeoutRed = useRef<number | undefined>(undefined);
@@ -99,20 +100,22 @@ function Onboarding(props: Props) {
 
   useEffect(() => {
     if (
-      props.location.pathname === `/onboarding/${onboardingSteps[2].id}/` &&
+      props.location.pathname === `/onboarding/${onboardingSteps[2]!.id}/` &&
       props.location.query?.platform &&
       onboardingContext.data.selectedSDK === undefined
     ) {
       const platformKey = Object.keys(platforms).find(
+        // @ts-ignore TS(7015): Element implicitly has an 'any' type because index... Remove this comment to see the full error message
         key => platforms[key].id === props.location.query.platform
       );
 
+      // @ts-ignore TS(7015): Element implicitly has an 'any' type because index... Remove this comment to see the full error message
       const platform = platformKey ? platforms[platformKey] : undefined;
 
       // if no platform found, we redirect the user to the platform select page
       if (!platform) {
         props.router.push(
-          normalizeUrl(`/onboarding/${organization.slug}/${onboardingSteps[1].id}/`)
+          normalizeUrl(`/onboarding/${organization.slug}/${onboardingSteps[1]!.id}/`)
         );
         return;
       }
@@ -129,6 +132,8 @@ function Onboarding(props: Props) {
           category: frameworkCategory,
           language: platform.language,
           type: platform.type,
+          link: platform.link,
+          name: platform.name,
         },
       });
     }
@@ -142,7 +147,7 @@ function Onboarding(props: Props) {
   ]);
 
   const shallProjectBeDeleted =
-    onboardingSteps[stepIndex].id === 'setup-docs' &&
+    stepObj?.id === 'setup-docs' &&
     recentCreatedProject &&
     // if the project has received a first error, we don't delete it
     recentCreatedProject.firstError === false &&
@@ -191,7 +196,7 @@ function Onboarding(props: Props) {
   const goNextStep = useCallback(
     (step: StepDescriptor, platform?: OnboardingSelectedSDK) => {
       const currentStepIndex = onboardingSteps.findIndex(s => s.id === step.id);
-      const nextStep = onboardingSteps[currentStepIndex + 1];
+      const nextStep = onboardingSteps[currentStepIndex + 1]!;
 
       if (nextStep.id === 'setup-docs' && !platform) {
         return;
@@ -214,9 +219,10 @@ function Onboarding(props: Props) {
     const newProjects = Object.keys(onboardingContext.data.projects).reduce(
       (acc, key) => {
         if (
-          onboardingContext.data.projects[key].slug !==
+          onboardingContext.data.projects[key]!.slug !==
           onboardingContext.data.selectedSDK?.key
         ) {
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           acc[key] = onboardingContext.data.projects[key];
         }
         return acc;
@@ -268,12 +274,12 @@ function Onboarding(props: Props) {
 
       trackAnalytics('onboarding.back_button_clicked', {
         organization,
-        from: onboardingSteps[stepIndex].id,
+        from: onboardingSteps[stepIndex]!.id,
         to: previousStep.id,
       });
 
       // from selected platform to welcome
-      if (onboardingSteps[stepIndex].id === 'select-platform') {
+      if (onboardingSteps[stepIndex]!.id === 'select-platform') {
         onboardingContext.setData({...onboardingContext.data, selectedSDK: undefined});
 
         props.router.replace(
@@ -283,7 +289,7 @@ function Onboarding(props: Props) {
       }
 
       // from setup docs to selected platform
-      if (onboardingSteps[stepIndex].id === 'setup-docs' && shallProjectBeDeleted) {
+      if (onboardingSteps[stepIndex]!.id === 'setup-docs' && shallProjectBeDeleted) {
         trackAnalytics('onboarding.data_removal_modal_confirm_button_clicked', {
           organization,
           platform: recentCreatedProject.slug,
@@ -330,10 +336,12 @@ function Onboarding(props: Props) {
     );
   };
 
-  if (!stepObj || stepIndex === -1) {
+  // Redirect to the first step if we end up in an invalid state
+  const isInvalidDocsStep = stepId === 'setup-docs' && !projectSlug;
+  if (!stepObj || stepIndex === -1 || isInvalidDocsStep) {
     return (
       <Redirect
-        to={normalizeUrl(`/onboarding/${organization.slug}/${onboardingSteps[0].id}/`)}
+        to={normalizeUrl(`/onboarding/${organization.slug}/${onboardingSteps[0]!.id}/`)}
       />
     );
   }
@@ -379,15 +387,17 @@ function Onboarding(props: Props) {
             numSteps={onboardingSteps.length}
             currentStepIndex={stepIndex}
             onClick={i => {
-              if (i < stepIndex && shallProjectBeDeleted) {
+              if ((i as number) < stepIndex && shallProjectBeDeleted) {
                 openConfirmModal({
                   ...goBackDeletionAlertModalProps,
+                  // @ts-ignore TS(2345): Argument of type 'number | MouseEvent<HTMLDivEleme... Remove this comment to see the full error message
                   onConfirm: () => handleGoBack(i),
                 });
                 return;
               }
 
-              goToStep(onboardingSteps[i]);
+              // @ts-ignore TS(2538): Type 'MouseEvent<HTMLDivElement, MouseEvent>' cann... Remove this comment to see the full error message
+              goToStep(onboardingSteps[i]!);
             }}
           />
         )}
@@ -402,8 +412,18 @@ function Onboarding(props: Props) {
         <Confirm bypass={!shallProjectBeDeleted} {...goBackDeletionAlertModalProps}>
           <Back animate={stepIndex > 0 ? 'visible' : 'hidden'} />
         </Confirm>
-        <AnimatePresence exitBeforeEnter onExitComplete={updateAnimationState}>
-          <OnboardingStep key={stepObj.id} data-test-id={`onboarding-step-${stepObj.id}`}>
+        <AnimatePresence mode="wait" onExitComplete={updateAnimationState}>
+          <OnboardingStep
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={{animate: {}}}
+            transition={testableTransition({
+              staggerChildren: 0.2,
+            })}
+            key={stepObj.id}
+            data-test-id={`onboarding-step-${stepObj.id}`}
+          >
             {stepObj.Component && (
               <stepObj.Component
                 active
@@ -472,33 +492,6 @@ const OnboardingStep = styled(motion.div)`
   display: flex;
   flex-direction: column;
 `;
-
-OnboardingStep.defaultProps = {
-  initial: 'initial',
-  animate: 'animate',
-  exit: 'exit',
-  variants: {animate: {}},
-  transition: testableTransition({
-    staggerChildren: 0.2,
-  }),
-};
-
-const Sidebar = styled(motion.div)`
-  width: 850px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-`;
-
-Sidebar.defaultProps = {
-  initial: 'initial',
-  animate: 'animate',
-  exit: 'exit',
-  variants: {animate: {}},
-  transition: testableTransition({
-    staggerChildren: 0.2,
-  }),
-};
 
 const AdaptivePageCorners = styled(PageCorners)`
   --corner-scale: 1;

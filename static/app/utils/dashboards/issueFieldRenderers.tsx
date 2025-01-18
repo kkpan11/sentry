@@ -3,8 +3,9 @@ import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 import type {Location} from 'history';
 
-import AssigneeSelector from 'sentry/components/assigneeSelector';
 import Count from 'sentry/components/count';
+import DeprecatedAssigneeSelector from 'sentry/components/deprecatedAssigneeSelector';
+import ExternalLink from 'sentry/components/links/externalLink';
 import Link from 'sentry/components/links/link';
 import {getRelativeSummary} from 'sentry/components/timeRangeSelector/utils';
 import {Tooltip} from 'sentry/components/tooltip';
@@ -12,9 +13,11 @@ import {DEFAULT_STATS_PERIOD} from 'sentry/constants';
 import {t} from 'sentry/locale';
 import MemberListStore from 'sentry/stores/memberListStore';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
 import type {EventData} from 'sentry/utils/discover/eventView';
 import EventView from 'sentry/utils/discover/eventView';
+import {SavedQueryDatasets} from 'sentry/utils/discover/types';
+import {hasDatasetSelector} from 'sentry/views/dashboards/utils';
 import {FieldKey} from 'sentry/views/dashboards/widgetBuilder/issueWidget/fields';
 
 import {Container, FieldShortId, OverflowLink} from '../discover/styles';
@@ -94,7 +97,7 @@ const SPECIAL_FIELDS: SpecialFields = {
       const memberList = MemberListStore.getAll();
       return (
         <ActorContainer>
-          <AssigneeSelector id={data.id} memberList={memberList} noDropdown />
+          <DeprecatedAssigneeSelector id={data.id} memberList={memberList} noDropdown />
         </ActorContainer>
       );
     },
@@ -141,7 +144,15 @@ const SPECIAL_FIELDS: SpecialFields = {
   },
   links: {
     sortField: null,
-    renderFunc: ({links}) => <LinksContainer dangerouslySetInnerHTML={{__html: links}} />,
+    renderFunc: ({links}) => (
+      <LinksContainer>
+        {links.map((link: any, index: any) => (
+          <ExternalLink key={index} href={link.url}>
+            {link.displayName}
+          </ExternalLink>
+        ))}
+      </LinksContainer>
+    ),
   },
 };
 
@@ -224,7 +235,11 @@ const getDiscoverUrl = (
     query: `issue.id:${data.id}${filtered ? data.discoverSearchQuery : ''}`,
     version: 2,
   });
-  return discoverView.getResultsViewUrlTarget(organization.slug);
+  return discoverView.getResultsViewUrlTarget(
+    organization.slug,
+    false,
+    hasDatasetSelector(organization) ? SavedQueryDatasets.ERRORS : undefined
+  );
 };
 
 export function getSortField(field: string): string | null {
@@ -269,13 +284,13 @@ const SecondaryCount = styled(Count)`
   }
 `;
 
-const WrappedCount = styled(({value, ...p}) => (
+const WrappedCount = styled(({value, ...p}: any) => (
   <div {...p}>
     <Count value={value} />
   </div>
 ))`
   text-align: right;
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   font-variant-numeric: tabular-nums;
   padding-left: ${space(2)};
   color: ${p => p.theme.subText};
@@ -313,6 +328,7 @@ export function getIssueFieldRenderer(
   field: string
 ): FieldFormatterRenderFunctionPartial | null {
   if (SPECIAL_FIELDS.hasOwnProperty(field)) {
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     return SPECIAL_FIELDS[field].renderFunc;
   }
 

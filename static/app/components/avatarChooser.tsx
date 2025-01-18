@@ -16,7 +16,9 @@ import PanelHeader from 'sentry/components/panels/panelHeader';
 import Well from 'sentry/components/well';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {AvatarUser, Organization, SentryApp, Team} from 'sentry/types';
+import type {SentryApp} from 'sentry/types/integrations';
+import type {Organization, Team} from 'sentry/types/organization';
+import type {AvatarUser} from 'sentry/types/user';
 import withApi from 'sentry/utils/withApi';
 
 export type Model = Pick<AvatarUser, 'avatar'>;
@@ -99,7 +101,9 @@ class AvatarChooser extends Component<Props, State> {
       return resp;
     }
     const isColor = type === 'sentryAppColor';
-    return {avatar: resp?.avatars?.find(({color}) => color === isColor) ?? undefined};
+    return {
+      avatar: resp?.avatars?.find(({color}: any) => color === isColor) ?? undefined,
+    };
   }
 
   handleError(msg: string) {

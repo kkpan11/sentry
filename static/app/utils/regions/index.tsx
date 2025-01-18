@@ -1,6 +1,7 @@
 import {t} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
-import type {Organization, Region} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Region} from 'sentry/types/system';
 
 const RegionDisplayName: Record<string, string> = {
   US: t('United States of America (US)'),
@@ -25,6 +26,7 @@ export function getRegionDisplayName(region: Region): string {
 
 export function getRegionFlagIndicator(region: Region): RegionFlagIndicator | undefined {
   const regionName = region.name.toUpperCase();
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   return RegionFlagIndicator[regionName];
 }
 
@@ -51,22 +53,27 @@ export function getRegionDataFromOrganization(
   };
 }
 
-export function getRegionChoices(): [string, string][] {
-  const regions = ConfigStore.get('regions') ?? [];
+export function getRegions(): Region[] {
+  return ConfigStore.get('regions') ?? [];
+}
 
-  return regions.map(region => {
-    const {url} = region;
-    return [
-      url,
-      `${getRegionFlagIndicator(region) || ''} ${getRegionDisplayName(region)}`,
-    ];
-  });
+export function getRegionChoices(exclude: RegionData[] = []): [string, string][] {
+  const regions = getRegions();
+  const excludedRegionNames = exclude.map(region => region.name);
+
+  return regions
+    .filter(region => {
+      return !excludedRegionNames.includes(region.name);
+    })
+    .map(region => {
+      const {url} = region;
+      return [
+        url,
+        `${getRegionFlagIndicator(region) || ''} ${getRegionDisplayName(region)}`,
+      ];
+    });
 }
 
 export function shouldDisplayRegions(): boolean {
-  const regionCount = (ConfigStore.get('regions') ?? []).length;
-  return (
-    ConfigStore.get('features').has('organizations:multi-region-selector') &&
-    regionCount > 1
-  );
+  return getRegions().length > 1;
 }

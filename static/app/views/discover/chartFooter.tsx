@@ -7,7 +7,7 @@ import {
   SectionValue,
 } from 'sentry/components/charts/styles';
 import {t} from 'sentry/locale';
-import type {SelectValue} from 'sentry/types';
+import type {SelectValue} from 'sentry/types/core';
 import type EventView from 'sentry/utils/discover/eventView';
 import {TOP_EVENT_MODES} from 'sentry/utils/discover/types';
 
@@ -83,7 +83,7 @@ export default function ChartFooter({
         {TOP_EVENT_MODES.includes(displayMode) ? (
           <OptionSelector
             title={t('Y-Axis')}
-            selected={yAxisValue[0]}
+            selected={yAxisValue[0]!}
             options={yAxisOptions}
             onChange={yAxis => onAxisChange([yAxis])}
           />

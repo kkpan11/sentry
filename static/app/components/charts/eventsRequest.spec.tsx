@@ -72,7 +72,22 @@ describe('EventsRequest', function () {
       expect(doEventsRequest).toHaveBeenCalled();
     });
 
-    it('makes a new request if projects prop changes', function () {
+    it('sets use RPC param', async function () {
+      render(
+        <EventsRequest {...DEFAULTS} useRpc>
+          {mock}
+        </EventsRequest>
+      );
+      await waitFor(() => expect(doEventsRequest).toHaveBeenCalledTimes(1));
+      expect(doEventsRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          useRpc: true,
+        })
+      );
+    });
+
+    it('makes a new request if projects prop changes', async function () {
       const {rerender} = render(<EventsRequest {...DEFAULTS}>{mock}</EventsRequest>);
       (doEventsRequest as jest.Mock).mockClear();
 
@@ -81,6 +96,7 @@ describe('EventsRequest', function () {
           {mock}
         </EventsRequest>
       );
+      await waitFor(() => expect(doEventsRequest).toHaveBeenCalledTimes(1));
       expect(doEventsRequest).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -89,7 +105,7 @@ describe('EventsRequest', function () {
       );
     });
 
-    it('makes a new request if environments prop changes', function () {
+    it('makes a new request if environments prop changes', async function () {
       const {rerender} = render(<EventsRequest {...DEFAULTS}>{mock}</EventsRequest>);
       (doEventsRequest as jest.Mock).mockClear();
 
@@ -98,6 +114,7 @@ describe('EventsRequest', function () {
           {mock}
         </EventsRequest>
       );
+      await waitFor(() => expect(doEventsRequest).toHaveBeenCalledTimes(1));
       expect(doEventsRequest).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -106,7 +123,7 @@ describe('EventsRequest', function () {
       );
     });
 
-    it('makes a new request if period prop changes', function () {
+    it('makes a new request if period prop changes', async function () {
       const {rerender} = render(<EventsRequest {...DEFAULTS}>{mock}</EventsRequest>);
       (doEventsRequest as jest.Mock).mockClear();
 
@@ -116,6 +133,7 @@ describe('EventsRequest', function () {
         </EventsRequest>
       );
 
+      await waitFor(() => expect(doEventsRequest).toHaveBeenCalledTimes(1));
       expect(doEventsRequest).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -491,7 +509,7 @@ describe('EventsRequest', function () {
         </EventsRequest>
       );
 
-      const generateExpected = name => {
+      const generateExpected = (name: any) => {
         return {
           seriesName: name,
           data: [
@@ -554,7 +572,7 @@ describe('EventsRequest', function () {
         </EventsRequest>
       );
 
-      const generateExpected = name => {
+      const generateExpected = (name: any) => {
         return {
           seriesName: name,
           data: [

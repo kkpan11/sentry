@@ -36,6 +36,12 @@ describe('PageFiltersStore', function () {
     });
   });
 
+  it('returns a stable reference with getState', () => {
+    PageFiltersStore.updateProjects([1], []);
+    const state = PageFiltersStore.getState();
+    expect(Object.is(state, PageFiltersStore.getState())).toBe(true);
+  });
+
   it('updateProjects()', async function () {
     expect(PageFiltersStore.getState().selection.projects).toEqual([]);
     updateProjects([1]);
@@ -139,10 +145,10 @@ describe('PageFiltersStore', function () {
   });
 
   it('updatePersistence()', async function () {
-    expect(PageFiltersStore.getState().shouldPersist).toEqual(true);
+    expect(PageFiltersStore.getState().shouldPersist).toBe(true);
     updatePersistence(false);
     await tick();
-    expect(PageFiltersStore.getState().shouldPersist).toEqual(false);
+    expect(PageFiltersStore.getState().shouldPersist).toBe(false);
   });
 
   it('can mark filters as pinned', async function () {

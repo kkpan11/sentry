@@ -1,24 +1,27 @@
 import {useCallback, useRef, useState} from 'react';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 import debounce from 'lodash/debounce';
 
+import {getSearchGroupWithItemMarkedActive} from 'sentry/components/deprecatedSmartSearchBar/utils';
 import BaseSearchBar from 'sentry/components/searchBar';
-import {getSearchGroupWithItemMarkedActive} from 'sentry/components/smartSearchBar/utils';
 import {DEFAULT_DEBOUNCE_DURATION} from 'sentry/constants';
 import {t} from 'sentry/locale';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import {trackAnalytics} from 'sentry/utils/analytics';
 import type EventView from 'sentry/utils/discover/eventView';
 import {doDiscoverQuery} from 'sentry/utils/discover/genericDiscoverQuery';
+import {parsePeriodToHours} from 'sentry/utils/duration/parsePeriodToHours';
 import {MutableSearch} from 'sentry/utils/tokenizeSearch';
 import useApi from 'sentry/utils/useApi';
+import {useNavigate} from 'sentry/utils/useNavigate';
 import useOnClickOutside from 'sentry/utils/useOnClickOutside';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 import {transactionSummaryRouteWithQuery} from 'sentry/views/performance/transactionSummary/utils';
 
-import SearchDropdown from '../smartSearchBar/searchDropdown';
-import type {SearchGroup} from '../smartSearchBar/types';
-import {ItemType} from '../smartSearchBar/types';
+import SearchDropdown from '../deprecatedSmartSearchBar/searchDropdown';
+import type {SearchGroup} from '../deprecatedSmartSearchBar/types';
+import {ItemType} from '../deprecatedSmartSearchBar/types';
+
+const TRANSACTION_SEARCH_PERIOD = '14d';
 
 export type SearchBarProps = {
   eventView: EventView;
@@ -41,6 +44,7 @@ function SearchBar(props: SearchBarProps) {
     additionalConditions,
   } = props;
 
+  const navigate = useNavigate();
   const [searchResults, setSearchResults] = useState<SearchGroup[]>([]);
   const transactionCount = searchResults[0]?.children?.length || 0;
   const [highlightedItemIndex, setHighlightedItemIndex] = useState(-1);
@@ -59,7 +63,7 @@ function SearchBar(props: SearchBarProps) {
 
   const projectIdStrings = (eventView.project as Readonly<number>[])?.map(String);
 
-  const handleSearchChange = query => {
+  const handleSearchChange = (query: any) => {
     setSearchString(query);
 
     if (query.length === 0) {
@@ -93,12 +97,12 @@ function SearchBar(props: SearchBarProps) {
       isDropdownOpen &&
       transactionCount > 0
     ) {
-      const currentHighlightedItem = searchResults[0].children[highlightedItemIndex];
+      const currentHighlightedItem = searchResults[0]!.children[highlightedItemIndex];
       const nextHighlightedItemIndex =
         (highlightedItemIndex + transactionCount + (key === 'ArrowUp' ? -1 : 1)) %
         transactionCount;
       setHighlightedItemIndex(nextHighlightedItemIndex);
-      const nextHighlightedItem = searchResults[0].children[nextHighlightedItemIndex];
+      const nextHighlightedItem = searchResults[0]!.children[nextHighlightedItemIndex];
 
       let newSearchResults = searchResults;
       if (currentHighlightedItem) {
@@ -147,6 +151,15 @@ function SearchBar(props: SearchBarProps) {
           if (Object.keys(api.activeRequests).length) {
             api.clear();
           }
+          const parsedPeriodHours = eventView.statsPeriod
+            ? parsePeriodToHours(eventView.statsPeriod)
+            : 0;
+          const parsedDefaultHours = parsePeriodToHours(TRANSACTION_SEARCH_PERIOD);
+
+          const statsPeriod =
+            parsedDefaultHours > parsedPeriodHours
+              ? TRANSACTION_SEARCH_PERIOD
+              : eventView.statsPeriod;
 
           const [results] = await doDiscoverQuery<{
             data: DataItem[];
@@ -155,7 +168,7 @@ function SearchBar(props: SearchBarProps) {
             project: projectIdStrings,
             sort: '-count()',
             query: conditions.formatString(),
-            statsPeriod: eventView.statsPeriod,
+            statsPeriod,
             referrer: 'api.performance.transaction-name-search-bar',
           });
 
@@ -225,7 +238,15 @@ function SearchBar(props: SearchBarProps) {
       query,
     });
 
-    browserHistory.push(normalizeUrl(next));
+    navigate(next);
+  };
+  const logDocsOpenedEvent = () => {
+    trackAnalytics('search.docs_opened', {
+      organization,
+      search_type: 'performance',
+      search_source: 'performance_landing',
+      query: props.query,
+    });
   };
 
   return (
@@ -248,6 +269,7 @@ function SearchBar(props: SearchBarProps) {
           items={searchResults}
           onClick={handleChooseItem}
           onIconClick={handleClickItemIcon}
+          onDocsOpen={() => logDocsOpenedEvent()}
         />
       )}
     </Container>

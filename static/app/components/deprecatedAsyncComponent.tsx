@@ -1,15 +1,17 @@
 import {Component} from 'react';
-import type {RouteComponentProps} from 'react-router';
 import * as Sentry from '@sentry/react';
 import isEqual from 'lodash/isEqual';
 
 import type {ResponseMeta} from 'sentry/api';
 import {Client} from 'sentry/api';
-import AsyncComponentSearchInput from 'sentry/components/asyncComponentSearchInput';
 import LoadingError from 'sentry/components/loadingError';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import {t} from 'sentry/locale';
 import {SentryPropTypeValidators} from 'sentry/sentryPropTypeValidators';
+import type {
+  RouteComponentProps,
+  RouteContextInterface,
+} from 'sentry/types/legacyReactRouter';
 import {metric} from 'sentry/utils/analytics';
 import getRouteStringFromRoutes from 'sentry/utils/getRouteStringFromRoutes';
 import PermissionDenied from 'sentry/views/permissionDenied';
@@ -25,16 +27,6 @@ export interface AsyncComponentState {
   reloading: boolean;
   remainingRequests?: number;
 }
-
-type SearchInputProps = React.ComponentProps<typeof AsyncComponentSearchInput>;
-
-type RenderSearchInputArgs = Omit<
-  SearchInputProps,
-  'api' | 'onSuccess' | 'onError' | 'url' | keyof RouteComponentProps<{}, {}>
-> & {
-  stateKey?: string;
-  url?: SearchInputProps['url'];
-};
 
 /**
  * Wraps methods on the AsyncComponent to catch errors and set the `error`
@@ -118,7 +110,7 @@ class DeprecatedAsyncComponent<
       return;
     }
 
-    // Take a measurement from when this component is initially created until it finishes it's first
+    // Take a measurement from when this component is initially created until it finishes its first
     // set of API requests
     if (
       !this._measurement.hasMeasured &&
@@ -151,6 +143,8 @@ class DeprecatedAsyncComponent<
     this.api.clear();
     document.removeEventListener('visibilitychange', this.visibilityReloader);
   }
+
+  declare context: {router: RouteContextInterface};
 
   /**
    * Override this flag to have the component reload its state when the window
@@ -216,6 +210,7 @@ class DeprecatedAsyncComponent<
     }
 
     endpoints.forEach(([stateKey, _endpoint]) => {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       state[stateKey] = null;
     });
     return state;
@@ -299,11 +294,11 @@ class DeprecatedAsyncComponent<
     });
   };
 
-  onRequestSuccess(_resp /* {stateKey, data, resp} */) {
+  onRequestSuccess(_resp: any /* {stateKey, data, resp} */) {
     // Allow children to implement this
   }
 
-  onRequestError(_resp, _args) {
+  onRequestError(_resp: any, _args: any) {
     // Allow children to implement this
   }
 
@@ -311,7 +306,7 @@ class DeprecatedAsyncComponent<
     // Allow children to implement this
   }
 
-  handleRequestSuccess({stateKey, data, resp}, initialRequest?: boolean) {
+  handleRequestSuccess({stateKey, data, resp}: any, initialRequest?: boolean) {
     this.setState(
       prevState => {
         const state = {
@@ -339,7 +334,7 @@ class DeprecatedAsyncComponent<
     this.onRequestSuccess({stateKey, data, resp});
   }
 
-  handleError(error, args) {
+  handleError(error: any, args: any) {
     const [stateKey] = args;
     if (error?.responseText) {
       Sentry.addBreadcrumb({
@@ -377,25 +372,6 @@ class DeprecatedAsyncComponent<
    */
   getEndpoints(): Array<[string, string, any?, any?]> {
     return [];
-  }
-
-  renderSearchInput({stateKey, url, ...props}: RenderSearchInputArgs) {
-    const [firstEndpoint] = this.getEndpoints() || [null];
-    const stateKeyOrDefault = stateKey || firstEndpoint?.[0];
-    const urlOrDefault = url || firstEndpoint?.[1];
-    return (
-      <AsyncComponentSearchInput
-        url={urlOrDefault}
-        {...props}
-        api={this.api}
-        onSuccess={(data, resp) => {
-          this.handleRequestSuccess({stateKey: stateKeyOrDefault, data, resp});
-        }}
-        onError={() => {
-          this.renderError(new Error('Error with AsyncComponentSearchInput'));
-        }}
-      />
-    );
   }
 
   renderLoading(): React.ReactNode {

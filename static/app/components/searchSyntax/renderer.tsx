@@ -67,6 +67,10 @@ function renderToken(token: TokenResult<Token>, cursor: number) {
     case Token.FREE_TEXT:
       return <FreeTextToken token={token} cursor={cursor} />;
 
+    case Token.L_PAREN:
+    case Token.R_PAREN:
+      return <Paren>{token.text}</Paren>;
+
     default:
       return token.text;
   }
@@ -220,7 +224,13 @@ function KeyToken({
   token,
   negated,
 }: {
-  token: TokenResult<Token.KEY_SIMPLE | Token.KEY_AGGREGATE | Token.KEY_EXPLICIT_TAG>;
+  token: TokenResult<
+    | Token.KEY_SIMPLE
+    | Token.KEY_AGGREGATE
+    | Token.KEY_EXPLICIT_TAG
+    | Token.KEY_EXPLICIT_NUMBER_TAG
+    | Token.KEY_EXPLICIT_STRING_TAG
+  >;
   negated?: boolean;
 }) {
   let value: React.ReactNode = token.text;
@@ -304,7 +314,7 @@ const Negation = styled('span')`
   border-right: none;
   padding-left: 1px;
   margin-left: -1px;
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   border-radius: 2px 0 0 2px;
   color: ${p => p.theme.red400};
 `;
@@ -312,7 +322,7 @@ const Negation = styled('span')`
 const Key = styled('span')<{negated: boolean}>`
   ${filterCss};
   border-right: none;
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   ${p =>
     !p.negated
       ? css`
@@ -366,12 +376,12 @@ const FreeText = styled('span')`
 `;
 
 const Unit = styled('span')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   color: ${p => p.theme.green400};
 `;
 
 const LogicBoolean = styled('span')<{invalid: boolean}>`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
   color: ${p => p.theme.gray300};
   ${p => p.invalid && `color: ${p.theme.red400}`}
 `;
@@ -388,15 +398,19 @@ const ListComma = styled('span')`
   color: ${p => p.theme.gray300};
 `;
 
+const Paren = styled('span')`
+  color: ${p => p.theme.gray300};
+`;
+
 const InList = styled('span')`
   &:before {
     content: '[';
-    font-weight: bold;
+    font-weight: ${p => p.theme.fontWeightBold};
     color: ${p => p.theme.purple400};
   }
   &:after {
     content: ']';
-    font-weight: bold;
+    font-weight: ${p => p.theme.fontWeightBold};
     color: ${p => p.theme.purple400};
   }
 
@@ -405,7 +419,7 @@ const InList = styled('span')`
   }
 `;
 
-const LogicGroup = styled(({children, ...props}) => (
+const LogicGroup = styled(({children, ...props}: any) => (
   <span {...props}>
     <span>(</span>
     {children}
@@ -422,7 +436,7 @@ const LogicGroup = styled(({children, ...props}) => (
       top: -5px;
       color: ${p => p.theme.pink400};
       font-size: 16px;
-      font-weight: bold;
+      font-weight: ${p => p.theme.fontWeightBold};
     }
   }
 

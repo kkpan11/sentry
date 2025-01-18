@@ -14,9 +14,8 @@ from sentry.api.authentication import (
     OrgAuthTokenAuthentication,
     UserAuthTokenAuthentication,
 )
-from sentry.models.userip import UserIP
+from sentry.users.models.userip import UserIP
 from sentry.utils.auth import AuthUserPasswordExpired, logger
-from sentry.utils.linksign import process_signature
 
 
 def get_user(request):
@@ -38,7 +37,10 @@ def get_user(request):
                 # If the nonces don't match, this session is anonymous.
                 logger.info(
                     "user.auth.invalid-nonce",
-                    extra={"ip_address": request.META["REMOTE_ADDR"], "user_id": user.id},
+                    extra={
+                        "ip_address": request.META["REMOTE_ADDR"],
+                        "user_id": user.id,
+                    },
                 )
                 user = AnonymousUser()
             else:
@@ -47,16 +49,22 @@ def get_user(request):
     return request._cached_user
 
 
-class SessionAuthenticationMiddleware(MiddlewareMixin):
+class AuthenticationMiddleware(MiddlewareMixin):
     def process_request(self, request: HttpRequest) -> None:
+        if request.path.startswith("/api/0/internal/rpc/"):
+            # Avoid doing RPC authentication when we're already
+            # in an RPC request.
+            request.user = AnonymousUser()
+            return
+
         auth = get_authorization_header(request).split()
 
         if auth:
-            for authenticator_class in [
+            for authenticator_class in (
                 UserAuthTokenAuthentication,
                 OrgAuthTokenAuthentication,
                 ApiKeyAuthentication,
-            ]:
+            ):
                 authenticator = authenticator_class()
                 if not authenticator.accepts_auth(auth):
                     continue
@@ -68,40 +76,18 @@ class SessionAuthenticationMiddleware(MiddlewareMixin):
                     request.user, request.auth = result
                 else:
                     # default to anonymous user and use IP ratelimit
-                    request.user = SimpleLazyObject(lambda: get_user(request))
+                    request.user, request.auth = SimpleLazyObject(lambda: get_user(request)), None
                 return
 
         # default to anonymous user and use IP ratelimit
-        request.user = SimpleLazyObject(lambda: get_user(request))
+        request.user, request.auth = SimpleLazyObject(lambda: get_user(request)), None
 
     def process_exception(
         self, request: HttpRequest, exception: Exception
     ) -> HttpResponseBase | None:
         if isinstance(exception, AuthUserPasswordExpired):
-            from sentry.web.frontend.accounts import expired
+            from sentry.users.web.accounts import expired
 
             return expired(request, exception.user)
         else:
             return None
-
-
-class AuthenticationMiddleware(SessionAuthenticationMiddleware):
-    def process_request(self, request: HttpRequest) -> None:
-        request.user_from_signed_request = False
-
-        if request.path.startswith("/api/0/internal/rpc/"):
-            # Avoid doing RPC authentication when we're already
-            # in an RPC request.
-            request.user = AnonymousUser()
-            return
-
-        # If there is a valid signature on the request we override the
-        # user with the user contained within the signature.
-        user = process_signature(request)
-
-        if user is not None:
-            request.user = user
-            request.user_from_signed_request = True
-            return
-
-        return super().process_request(request)

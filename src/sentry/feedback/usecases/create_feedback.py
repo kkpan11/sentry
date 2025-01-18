@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, TypedDict
 from uuid import uuid4
 
 import jsonschema
+import sentry_sdk
 
+from sentry import features, options
 from sentry.constants import DataCategory
-from sentry.eventstore.models import Event
+from sentry.eventstore.models import Event, GroupEvent
+from sentry.feedback.usecases.spam_detection import is_spam, spam_detection_enabled
 from sentry.issues.grouptype import FeedbackGroup
 from sentry.issues.issue_occurrence import IssueEvidence, IssueOccurrence
 from sentry.issues.json_schemas import EVENT_PAYLOAD_SCHEMA, LEGACY_EVENT_PAYLOAD_SCHEMA
 from sentry.issues.producer import PayloadType, produce_occurrence_to_kafka
+from sentry.issues.status_change_message import StatusChangeMessage
+from sentry.models.group import GroupStatus
 from sentry.models.project import Project
 from sentry.signals import first_feedback_received, first_new_feedback_received
+from sentry.types.group import GroupSubStatus
 from sentry.utils import metrics
-from sentry.utils.dates import ensure_aware
 from sentry.utils.outcomes import Outcome, track_outcome
 from sentry.utils.safe import get_path
 
@@ -28,15 +33,43 @@ UNREAL_FEEDBACK_UNATTENDED_MESSAGE = "Sent in the unattended mode"
 
 class FeedbackCreationSource(Enum):
     NEW_FEEDBACK_ENVELOPE = "new_feedback_envelope"
-    NEW_FEEDBACK_DJANGO_ENDPOINT = "new_feedback_sentry_django_endpoint"  # TODO: delete this once feedback_ingest API deprecated
     USER_REPORT_DJANGO_ENDPOINT = "user_report_sentry_django_endpoint"
     USER_REPORT_ENVELOPE = "user_report_envelope"
     CRASH_REPORT_EMBED_FORM = "crash_report_embed_form"
+    UPDATE_USER_REPORTS_TASK = "update_user_reports_task"
+
+    @classmethod
+    def new_feedback_category_values(cls) -> set[str]:
+        return {
+            c.value
+            for c in [
+                cls.NEW_FEEDBACK_ENVELOPE,
+            ]
+        }
+
+    @classmethod
+    def old_feedback_category_values(cls) -> set[str]:
+        return {
+            c.value
+            for c in [
+                cls.CRASH_REPORT_EMBED_FORM,
+                cls.USER_REPORT_ENVELOPE,
+                cls.USER_REPORT_DJANGO_ENDPOINT,
+                cls.UPDATE_USER_REPORTS_TASK,
+            ]
+        }
 
 
-def make_evidence(feedback, source: FeedbackCreationSource):
+def make_evidence(feedback, source: FeedbackCreationSource, is_message_spam: bool | None):
     evidence_data = {}
     evidence_display = []
+    if feedback.get("associated_event_id"):
+        evidence_data["associated_event_id"] = feedback["associated_event_id"]
+        evidence_display.append(
+            IssueEvidence(
+                name="associated_event_id", value=feedback["associated_event_id"], important=False
+            )
+        )
     if feedback.get("contact_email"):
         evidence_data["contact_email"] = feedback["contact_email"]
         evidence_display.append(
@@ -54,17 +87,28 @@ def make_evidence(feedback, source: FeedbackCreationSource):
     evidence_data["source"] = source.value
     evidence_display.append(IssueEvidence(name="source", value=source.value, important=False))
 
+    if is_message_spam is True:
+        evidence_data["is_spam"] = is_message_spam
+        evidence_display.append(
+            IssueEvidence(name="is_spam", value=str(is_message_spam), important=False)
+        )
+
     return evidence_data, evidence_display
 
 
-def fix_for_issue_platform(event_data):
-    # the issue platform has slightly different requirements than ingest
-    # for event schema, so we need to massage the data a bit
+def fix_for_issue_platform(event_data: dict[str, Any]) -> dict[str, Any]:
+    """
+    The issue platform has slightly different requirements than ingest for event schema,
+    so we need to massage the data a bit.
+    * event["tags"] is coerced to a dict.
+    * If event["user"]["email"] is missing we try to set using the feedback context.
+
+    Returns:
+        A dict[str, Any] conforming to sentry.issues.json_schemas.EVENT_PAYLOAD_SCHEMA.
+    """
     ret_event: dict[str, Any] = {}
 
-    ret_event["timestamp"] = ensure_aware(
-        datetime.fromtimestamp(event_data["timestamp"])
-    ).isoformat()
+    ret_event["timestamp"] = datetime.fromtimestamp(event_data["timestamp"], UTC).isoformat()
 
     ret_event["received"] = event_data["received"]
 
@@ -81,7 +125,6 @@ def fix_for_issue_platform(event_data):
             "replay_id": event_data["contexts"].get("feedback", {}).get("replay_id")
         }
     ret_event["event_id"] = event_data["event_id"]
-    ret_event["tags"] = event_data.get("tags", [])
 
     ret_event["platform"] = event_data.get("platform", "other")
     ret_event["level"] = event_data.get("level", "info")
@@ -109,10 +152,36 @@ def fix_for_issue_platform(event_data):
     if not ret_event["user"].get("email", ""):
         ret_event["user"]["email"] = contact_email
 
+    # Force `tags` to be a dict if it's initially a list,
+    # since we can't guarantee its type here.
+    tags = event_data.get("tags", {})
+    tags_dict = {}
+    if isinstance(tags, list):
+        for [k, v] in tags:
+            tags_dict[k] = v
+    else:
+        tags_dict = tags
+    ret_event["tags"] = tags_dict
+
     # Set the event message to the feedback message.
     ret_event["logentry"] = {"message": feedback_obj.get("message")}
 
     return ret_event
+
+
+def validate_issue_platform_event_schema(event_data):
+    """
+    The issue platform schema validation does not run in dev atm so we have to do the validation
+    ourselves, or else our tests are not representative of what happens in prod.
+    """
+    try:
+        jsonschema.validate(event_data, EVENT_PAYLOAD_SCHEMA)
+    except jsonschema.exceptions.ValidationError:
+        try:
+            jsonschema.validate(event_data, LEGACY_EVENT_PAYLOAD_SCHEMA)
+        except jsonschema.exceptions.ValidationError:
+            metrics.incr("feedback.create_feedback_issue.invalid_schema")
+            raise
 
 
 def should_filter_feedback(event, project_id, source: FeedbackCreationSource):
@@ -125,39 +194,111 @@ def should_filter_feedback(event, project_id, source: FeedbackCreationSource):
         or event["contexts"].get("feedback") is None
         or event["contexts"]["feedback"].get("message") is None
     ):
-        metrics.incr("feedback.filtered", tags={"reason": "missing_context"}, sample_rate=1.0)
+        metrics.incr(
+            "feedback.create_feedback_issue.filtered",
+            tags={
+                "reason": "missing_context",
+                "referrer": source.value,
+            },
+        )
         return True
 
     if event["contexts"]["feedback"]["message"] == UNREAL_FEEDBACK_UNATTENDED_MESSAGE:
-        metrics.incr("feedback.filtered", tags={"reason": "unreal.unattended"}, sample_rate=1.0)
+        metrics.incr(
+            "feedback.create_feedback_issue.filtered",
+            tags={
+                "reason": "unreal.unattended",
+                "referrer": source.value,
+            },
+        )
         return True
 
     if event["contexts"]["feedback"]["message"].strip() == "":
-        metrics.incr("feedback.filtered", tags={"reason": "empty"}, sample_rate=1.0)
+        metrics.incr(
+            "feedback.create_feedback_issue.filtered",
+            tags={
+                "reason": "empty",
+                "referrer": source.value,
+            },
+        )
         return True
 
     return False
 
 
-def create_feedback_issue(event, project_id, source: FeedbackCreationSource):
+def create_feedback_issue(event, project_id: int, source: FeedbackCreationSource):
+    metrics.incr(
+        "feedback.create_feedback_issue.entered",
+        tags={
+            "referrer": source.value,
+        },
+    )
+
     if should_filter_feedback(event, project_id, source):
         return
 
-    metrics.incr("feedback.created", tags={"referrer": source.value}, sample_rate=1.0)
+    feedback_message = event["contexts"]["feedback"]["message"]
+    max_msg_size = options.get("feedback.message.max-size")  # Note options are cached.
+    project = Project.objects.get_from_cache(id=project_id)
+
+    # Spam detection.
+    is_message_spam = None
+    if spam_detection_enabled(project):
+        if len(feedback_message) <= max_msg_size:
+            try:
+                is_message_spam = is_spam(feedback_message)
+            except Exception:
+                # until we have LLM error types ironed out, just catch all exceptions
+                logger.exception(
+                    "Error checking if message is spam", extra={"project_id": project_id}
+                )
+            metrics.incr(
+                "feedback.create_feedback_issue.spam_detection",
+                tags={
+                    "is_spam": is_message_spam,
+                    "referrer": source.value,
+                },
+                sample_rate=1.0,
+            )
+        else:
+            is_message_spam = True
+
+    if len(feedback_message) > max_msg_size:
+        metrics.distribution(
+            "feedback.large_message",
+            len(feedback_message),
+            tags={
+                "entrypoint": "create_feedback_issue",
+                "referrer": source.value,
+            },
+        )
+        logger.info(
+            "Feedback message exceeds max size.",
+            extra={
+                "project_id": project_id,
+                "entrypoint": "create_feedback_issue",
+                "referrer": source.value,
+            },
+        )
+        # Sentry will capture `feedback_message` in local variables (truncated).
+        sentry_sdk.capture_message("Feedback message exceeds max size.", "warning")
+        feedback_message = feedback_message[:max_msg_size]
+
     # Note that some of the fields below like title and subtitle
     # are not used by the feedback UI, but are required.
     event["event_id"] = event.get("event_id") or uuid4().hex
-    detection_time = ensure_aware(datetime.fromtimestamp(event["timestamp"]))
-    evidence_data, evidence_display = make_evidence(event["contexts"]["feedback"], source)
+    detection_time = datetime.fromtimestamp(event["timestamp"], UTC)
+    evidence_data, evidence_display = make_evidence(
+        event["contexts"]["feedback"], source, is_message_spam
+    )
+    issue_fingerprint = [uuid4().hex]
     occurrence = IssueOccurrence(
         id=uuid4().hex,
         event_id=event.get("event_id") or uuid4().hex,
         project_id=project_id,
-        fingerprint=[
-            uuid4().hex
-        ],  # random UUID for fingerprint so feedbacks are grouped individually
+        fingerprint=issue_fingerprint,  # random UUID for fingerprint so feedbacks are grouped individually
         issue_title="User Feedback",
-        subtitle=event["contexts"]["feedback"]["message"],
+        subtitle=feedback_message,
         resource_id=None,
         evidence_data=evidence_data,
         evidence_display=evidence_display,
@@ -176,11 +317,21 @@ def create_feedback_issue(event, project_id, source: FeedbackCreationSource):
     }
     event_fixed = fix_for_issue_platform(event_data)
 
+    # Set the user.email tag since we want to be able to display user.email on the feedback UI as a tag
+    # as well as be able to write alert conditions on it
+    user_email = get_path(event_fixed, "user", "email")
+    if user_email and "user.email" not in event_fixed["tags"]:
+        event_fixed["tags"]["user.email"] = user_email
+
+    # Set the trace.id tag to expose it for the feedback UI.
+    trace_id = get_path(event_fixed, "contexts", "trace", "trace_id")
+    if trace_id:
+        event_fixed["tags"]["trace.id"] = trace_id
+
     # make sure event data is valid for issue platform
     validate_issue_platform_event_schema(event_fixed)
 
-    project = Project.objects.get_from_cache(id=project_id)
-
+    # Analytics
     if not project.flags.has_feedbacks:
         first_feedback_received.send_robust(project=project, sender=Project)
 
@@ -188,14 +339,24 @@ def create_feedback_issue(event, project_id, source: FeedbackCreationSource):
         source
         in [
             FeedbackCreationSource.NEW_FEEDBACK_ENVELOPE,
-            FeedbackCreationSource.NEW_FEEDBACK_DJANGO_ENDPOINT,
         ]
         and not project.flags.has_new_feedbacks
     ):
         first_new_feedback_received.send_robust(project=project, sender=Project)
 
+    # Send to issue platform for processing.
     produce_occurrence_to_kafka(
         payload_type=PayloadType.OCCURRENCE, occurrence=occurrence, event_data=event_fixed
+    )
+    # Mark as spam. We need this since IP doesn't currently support an initial status of IGNORED.
+    if is_message_spam:
+        auto_ignore_spam_feedbacks(project, issue_fingerprint)
+    metrics.incr(
+        "feedback.create_feedback_issue.produced_occurrence",
+        tags={
+            "referrer": source.value,
+        },
+        sample_rate=1.0,
     )
 
     track_outcome(
@@ -211,15 +372,27 @@ def create_feedback_issue(event, project_id, source: FeedbackCreationSource):
     )
 
 
-def validate_issue_platform_event_schema(event_data):
+def auto_ignore_spam_feedbacks(project, issue_fingerprint):
     """
-    The issue platform schema validation does not run in dev atm so we have to do the validation
-    ourselves, or else our tests are not representative of what happens in prod.
+    Marks an issue as spam with a STATUS_CHANGE kafka message. The IGNORED status allows the occurrence to skip alerts
+    and be picked up by frontend spam queries.
     """
-    try:
-        jsonschema.validate(event_data, EVENT_PAYLOAD_SCHEMA)
-    except jsonschema.exceptions.ValidationError:
-        jsonschema.validate(event_data, LEGACY_EVENT_PAYLOAD_SCHEMA)
+    if features.has("organizations:user-feedback-spam-filter-actions", project.organization):
+        metrics.incr("feedback.spam-detection-actions.set-ignored")
+        produce_occurrence_to_kafka(
+            payload_type=PayloadType.STATUS_CHANGE,
+            status_change=StatusChangeMessage(
+                fingerprint=issue_fingerprint,
+                project_id=project.id,
+                new_status=GroupStatus.IGNORED,  # we use ignored in the UI for the spam tab
+                new_substatus=GroupSubStatus.FOREVER,
+            ),
+        )
+
+
+###########
+# Shim code
+###########
 
 
 class UserReportShimDict(TypedDict):
@@ -232,7 +405,7 @@ class UserReportShimDict(TypedDict):
 
 def shim_to_feedback(
     report: UserReportShimDict,
-    event: Event,
+    event: Event | GroupEvent,
     project: Project,
     source: FeedbackCreationSource,
 ):
@@ -243,6 +416,9 @@ def shim_to_feedback(
     User feedbacks are an event type, so we try and grab as much from the
     legacy user report and event to create the new feedback.
     """
+    if is_in_feedback_denylist(project.organization):
+        return
+
     try:
         feedback_event: dict[str, Any] = {
             "contexts": {
@@ -254,31 +430,28 @@ def shim_to_feedback(
             },
         }
 
-        if event:
-            feedback_event["contexts"]["feedback"]["associated_event_id"] = event.event_id
+        feedback_event["contexts"]["feedback"]["associated_event_id"] = event.event_id
 
-            if get_path(event.data, "contexts", "replay", "replay_id"):
-                feedback_event["contexts"]["replay"] = event.data["contexts"]["replay"]
-                feedback_event["contexts"]["feedback"]["replay_id"] = event.data["contexts"][
-                    "replay"
-                ]["replay_id"]
-            feedback_event["timestamp"] = event.datetime.timestamp()
-            feedback_event["level"] = event.data["level"]
-            feedback_event["platform"] = event.platform
-            feedback_event["level"] = event.data["level"]
-            feedback_event["environment"] = event.get_environment().name
-            feedback_event["tags"] = [list(item) for item in event.tags]
+        if get_path(event.data, "contexts", "replay", "replay_id"):
+            feedback_event["contexts"]["replay"] = event.data["contexts"]["replay"]
+            feedback_event["contexts"]["feedback"]["replay_id"] = event.data["contexts"]["replay"][
+                "replay_id"
+            ]
 
-        else:
-            feedback_event["timestamp"] = datetime.utcnow().timestamp()
-            feedback_event["platform"] = "other"
-            feedback_event["level"] = report.get("level", "info")
+        if get_path(event.data, "contexts", "trace", "trace_id"):
+            feedback_event["contexts"]["trace"] = event.data["contexts"]["trace"]
 
-            if report.get("event_id"):
-                feedback_event["contexts"]["feedback"]["associated_event_id"] = report["event_id"]
+        feedback_event["timestamp"] = event.datetime.timestamp()
+        feedback_event["platform"] = event.platform
+        feedback_event["level"] = event.data["level"]
+        feedback_event["environment"] = event.get_environment().name
+        feedback_event["tags"] = [list(item) for item in event.tags]
 
         create_feedback_issue(feedback_event, project.id, source)
     except Exception:
-        logger.exception(
-            "Error attempting to create new User Feedback from Shiming old User Report"
-        )
+        logger.exception("Error attempting to create new user feedback by shimming a user report")
+        metrics.incr("feedback.shim_to_feedback.failed", tags={"referrer": source.value})
+
+
+def is_in_feedback_denylist(organization):
+    return organization.slug in options.get("feedback.organizations.slug-denylist")

@@ -1,5 +1,3 @@
-import type {InjectedRouter} from 'react-router';
-import {browserHistory} from 'react-router';
 import {urlEncode} from '@sentry/utils';
 import type {Location, Query} from 'history';
 import * as Papa from 'papaparse';
@@ -8,14 +6,16 @@ import {openAddToDashboardModal} from 'sentry/actionCreators/modal';
 import {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
 import {URL_PARAM} from 'sentry/constants/pageFilters';
 import {t} from 'sentry/locale';
+import type {SelectValue} from 'sentry/types/core';
+import type {Event} from 'sentry/types/event';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
 import type {
   NewQuery,
   Organization,
   OrganizationSummary,
-  Project,
-  SelectValue,
-} from 'sentry/types';
-import type {Event} from 'sentry/types/event';
+} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import {defined} from 'sentry/utils';
 import {getUtcDateString} from 'sentry/utils/dates';
 import type {TableDataRow} from 'sentry/utils/discover/discoverQuery';
 import type {EventData} from 'sentry/utils/discover/eventView';
@@ -36,6 +36,7 @@ import {
   getColumnsAndAggregates,
   getEquation,
   isAggregateEquation,
+  isAggregateFieldOrEquation,
   isEquation,
   isMeasurement,
   isSpanOperationBreakdownField,
@@ -43,21 +44,27 @@ import {
   PROFILING_FIELDS,
   TRACING_FIELDS,
 } from 'sentry/utils/discover/fields';
-import type {DisplayModes} from 'sentry/utils/discover/types';
-import {TOP_N} from 'sentry/utils/discover/types';
+import {DisplayModes, SavedQueryDatasets, TOP_N} from 'sentry/utils/discover/types';
 import {getTitle} from 'sentry/utils/events';
 import {DISCOVER_FIELDS, FieldValueType, getFieldDefinition} from 'sentry/utils/fields';
 import localStorage from 'sentry/utils/localStorage';
 import {MutableSearch} from 'sentry/utils/tokenizeSearch';
+import type {ReactRouter3Navigate} from 'sentry/utils/useNavigate';
+import {convertWidgetToBuilderStateParams} from 'sentry/views/dashboards/widgetBuilder/utils/convertWidgetToBuilderStateParams';
 
-import type {WidgetQuery} from '../dashboards/types';
-import {DashboardWidgetSource, DisplayType} from '../dashboards/types';
+import {
+  DashboardWidgetSource,
+  DisplayType,
+  type Widget,
+  type WidgetQuery,
+  WidgetType,
+} from '../dashboards/types';
 import {transactionSummaryRouteWithQuery} from '../performance/transactionSummary/utils';
 
 import {displayModeToDisplayType} from './savedQuery/utils';
 import type {FieldValue, TableColumn} from './table/types';
 import {FieldValueKind} from './table/types';
-import {ALL_VIEWS, TRANSACTION_VIEWS, WEB_VITALS_VIEWS} from './data';
+import {getAllViews, getTransactionViews, getWebVitalsViews} from './data';
 
 export type QueryWithColumnState =
   | Query
@@ -77,8 +84,6 @@ const TEMPLATE_TABLE_COLUMN: TableColumn<string> = {
   width: COL_WIDTH_UNDEFINED,
 };
 
-// TODO(mark) these types are coupled to the gridEditable component types and
-// I'd prefer the types to be more general purpose but that will require a second pass.
 export function decodeColumnOrder(fields: Readonly<Field[]>): TableColumn<string>[] {
   return fields.map((f: Field) => {
     const column: TableColumn<string> = {...TEMPLATE_TABLE_COLUMN};
@@ -102,6 +107,7 @@ export function decodeColumnOrder(fields: Readonly<Field[]>): TableColumn<string
       if (outputType !== null) {
         column.type = outputType;
       }
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       const aggregate = AGGREGATIONS[col.function[0]];
       column.isSortable = aggregate?.isSortable;
     } else if (col.kind === 'field') {
@@ -121,14 +127,15 @@ export function decodeColumnOrder(fields: Readonly<Field[]>): TableColumn<string
 
 export function pushEventViewToLocation(props: {
   location: Location;
+  navigate: ReactRouter3Navigate;
   nextEventView: EventView;
   extraQuery?: Query;
 }) {
-  const {location, nextEventView} = props;
+  const {navigate, location, nextEventView} = props;
   const extraQuery = props.extraQuery || {};
   const queryStringObject = nextEventView.generateQueryStringObject();
 
-  browserHistory.push({
+  navigate({
     ...location,
     query: {
       ...extraQuery,
@@ -140,20 +147,24 @@ export function pushEventViewToLocation(props: {
 export function generateTitle({
   eventView,
   event,
-  organization,
+  isHomepage,
 }: {
   eventView: EventView;
   event?: Event;
-  organization?: Organization;
+  isHomepage?: boolean;
 }) {
   const titles = [t('Discover')];
+
+  if (isHomepage) {
+    return t('Discover');
+  }
 
   const eventViewName = eventView.name;
   if (typeof eventViewName === 'string' && String(eventViewName).trim().length > 0) {
     titles.push(String(eventViewName).trim());
   }
 
-  const eventTitle = event ? getTitle(event, organization?.features).title : undefined;
+  const eventTitle = event ? getTitle(event).title : undefined;
 
   if (eventTitle) {
     titles.push(eventTitle);
@@ -165,11 +176,11 @@ export function generateTitle({
 }
 
 export function getPrebuiltQueries(organization: Organization) {
-  const views = [...ALL_VIEWS];
+  const views = [...getAllViews(organization)];
   if (organization.features.includes('performance-view')) {
     // insert transactions queries at index 2
-    views.splice(2, 0, ...TRANSACTION_VIEWS);
-    views.push(...WEB_VITALS_VIEWS);
+    views.splice(2, 0, ...getTransactionViews(organization));
+    views.push(...getWebVitalsViews(organization));
   }
 
   return views;
@@ -185,15 +196,15 @@ function disableMacros(value: string | null | boolean | number) {
   return value;
 }
 
-export function downloadAsCsv(tableData, columnOrder, filename) {
+export function downloadAsCsv(tableData: any, columnOrder: any, filename: any) {
   const {data} = tableData;
-  const headings = columnOrder.map(column => column.name);
-  const keys = columnOrder.map(column => column.key);
+  const headings = columnOrder.map((column: any) => column.name);
+  const keys = columnOrder.map((column: any) => column.key);
 
   const csvContent = Papa.unparse({
     fields: headings,
-    data: data.map(row =>
-      keys.map(key => {
+    data: data.map((row: any) =>
+      keys.map((key: any) => {
         return disableMacros(row[key]);
       })
     ),
@@ -227,12 +238,14 @@ function drilldownAggregate(
   func: Extract<Column, {kind: 'function'}>
 ): Extract<Column, {kind: 'field'}> | null {
   const key = func.function[0];
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   const aggregation = AGGREGATIONS[key];
   let column = func.function[1];
 
   if (ALIASED_AGGREGATES_COLUMN.hasOwnProperty(key)) {
     // Some aggregates are just shortcuts to other aggregates with
     // predefined arguments so we can directly map them to the result.
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     column = ALIASED_AGGREGATES_COLUMN[key];
   } else if (aggregation?.parameters?.[0]) {
     const parameter = aggregation.parameters[0];
@@ -294,7 +307,7 @@ export function getExpandedResults(
     expandedColumns[0] = {kind: 'field', field: 'id'};
   }
 
-  // update the columns according the the expansion above
+  // update the columns according the expansion above
   const nextView = expandedColumns.reduceRight(
     (newView, column, index) =>
       column === null
@@ -336,6 +349,7 @@ function generateAdditionalConditions(
     // more challenging to get at as their location in the structure does not
     // match their name.
     if (dataRow.hasOwnProperty(dataKey)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       let value = dataRow[dataKey];
 
       if (Array.isArray(value)) {
@@ -384,7 +398,7 @@ function generateAdditionalConditions(
           ? `tags[${column.field}]`
           : column.field;
 
-        const tagValue = dataRow.tags[tagIndex].value;
+        const tagValue = dataRow.tags[tagIndex]!.value;
         conditions[key] = tagValue;
       }
     }
@@ -401,7 +415,7 @@ export function usesTransactionsDataset(eventView: EventView, yAxisValue: string
   let usesTransactions: boolean = false;
   const parsedQuery = new MutableSearch(eventView.query);
   for (let index = 0; index < yAxisValue.length; index++) {
-    const yAxis = yAxisValue[index];
+    const yAxis = yAxisValue[index]!;
     const aggregateArg = getAggregateArg(yAxis) ?? '';
     if (isMeasurement(aggregateArg) || aggregateArg === 'transaction.duration') {
       usesTransactions = true;
@@ -444,7 +458,7 @@ function generateExpandedConditions(
 
   // Add additional conditions provided and generated.
   for (const key in conditions) {
-    const value = conditions[key];
+    const value = conditions[key]!;
 
     if (Array.isArray(value)) {
       parsedQuery.setFilterValues(key, value);
@@ -505,20 +519,15 @@ export function generateFieldOptions({
     fieldKeys = fieldKeys.filter(item => !PROFILING_FIELDS.includes(item));
   }
 
-  // Strip device.class if the org doesn't have access.
-  if (!organization.features.includes('device-classification')) {
-    fieldKeys = fieldKeys.filter(item => item !== 'device.class');
-  }
-
   const fieldOptions: Record<string, SelectValue<FieldValue>> = {};
 
   // Index items by prefixed keys as custom tags can overlap both fields and
   // function names. Having a mapping makes finding the value objects easier
   // later as well.
   functions.forEach(func => {
-    const ellipsis = aggregations[func].parameters.length ? '\u2026' : '';
-    const parameters = aggregations[func].parameters.map(param => {
-      const overrides = AGGREGATIONS[func].getFieldOverrides;
+    const ellipsis = aggregations[func]!.parameters.length ? '\u2026' : '';
+    const parameters = aggregations[func]!.parameters.map(param => {
+      const overrides = aggregations[func]!.getFieldOverrides;
       if (typeof overrides === 'undefined') {
         return param;
       }
@@ -589,13 +598,17 @@ export function generateFieldOptions({
   if (Array.isArray(spanOperationBreakdownKeys)) {
     spanOperationBreakdownKeys.sort();
     spanOperationBreakdownKeys.forEach(breakdownField => {
-      fieldOptions[`span_op_breakdown:${breakdownField}`] = {
-        label: breakdownField,
-        value: {
-          kind: FieldValueKind.BREAKDOWN,
-          meta: {name: breakdownField, dataType: 'duration'},
-        },
-      };
+      if (!fieldKeys.includes(breakdownField)) {
+        // These span op breakdowns are sometimes included in the fieldKeys
+        // so check before we add them, or else we surface duplicates
+        fieldOptions[`span_op_breakdown:${breakdownField}`] = {
+          label: breakdownField,
+          value: {
+            kind: FieldValueKind.BREAKDOWN,
+            meta: {name: breakdownField, dataType: 'duration'},
+          },
+        };
+      }
     });
   }
 
@@ -603,7 +616,7 @@ export function generateFieldOptions({
     tagKeys.sort();
     tagKeys.forEach(tag => {
       const tagValue =
-        fieldKeys.includes(tag) || AGGREGATIONS.hasOwnProperty(tag)
+        fieldKeys.includes(tag) || aggregations.hasOwnProperty(tag)
           ? `tags[${tag}]`
           : tag;
       fieldOptions[`tag:${tag}`] = {
@@ -650,8 +663,8 @@ export function eventViewToWidgetQuery({
     let orderbyFunction = '';
     const aggregateFields = [...queryYAxis, ...aggregates];
     for (let i = 0; i < aggregateFields.length; i++) {
-      if (sort.field === getAggregateAlias(aggregateFields[i])) {
-        orderbyFunction = aggregateFields[i];
+      if (sort.field === getAggregateAlias(aggregateFields[i]!)) {
+        orderbyFunction = aggregateFields[i]!;
         break;
       }
     }
@@ -685,11 +698,13 @@ export function handleAddQueryToDashboard({
   organization,
   router,
   yAxis,
+  widgetType,
 }: {
   eventView: EventView;
   location: Location;
   organization: Organization;
   router: InjectedRouter;
+  widgetType: WidgetType | undefined;
   query?: NewQuery;
   yAxis?: string | string[];
 }) {
@@ -706,35 +721,48 @@ export function handleAddQueryToDashboard({
     organization,
     yAxis,
     location,
+    widgetType,
   });
+
   openAddToDashboardModal({
     organization,
     selection: {
-      projects: eventView.project,
-      environments: eventView.environment,
+      projects: eventView.project.slice(),
+      environments: eventView.environment.slice(),
       datetime: {
-        start: eventView.start,
-        end: eventView.end,
-        period: eventView.statsPeriod,
+        start: eventView.start!,
+        end: eventView.end!,
+        period: eventView.statsPeriod!,
+        // Previously undetected because the type used to rely on an implicit any value.
+        // @ts-ignore TS(2322): Type 'string | boolean | undefined' is not assigna... Remove this comment to see the full error message
         utc: eventView.utc,
       },
     },
     widget: {
-      title: query?.name ?? eventView.name,
+      title: (query?.name ?? eventView.name)!,
       displayType: displayType === DisplayType.TOP_N ? DisplayType.AREA : displayType,
       queries: [
         {
           ...defaultWidgetQuery,
           aggregates: [...(typeof yAxis === 'string' ? [yAxis] : yAxis ?? ['count()'])],
+          ...(organization.features.includes('dashboards-widget-builder-redesign')
+            ? {
+                // The widget query params filters out aggregate fields
+                // so we can use the fields as columns. This is so yAxes
+                // can be grouped by the fields.
+                fields: widgetAsQueryParams?.field ?? [],
+                columns: widgetAsQueryParams?.field ?? [],
+              }
+            : {}),
         },
       ],
-      interval: eventView.interval,
-      limit:
-        displayType === DisplayType.TOP_N
-          ? Number(eventView.topEvents) || TOP_N
-          : undefined,
+      interval: eventView.interval!,
+      limit: widgetAsQueryParams?.limit,
+      widgetType,
     },
     router,
+    // Previously undetected because the type relied on implicit any.
+    // @ts-ignore TS(2322): Type '{ dataset?: WidgetType | undefined; descript... Remove this comment to see the full error message
     widgetAsQueryParams,
     location,
   });
@@ -784,11 +812,13 @@ export function constructAddQueryToDashboardLink({
   organization,
   yAxis,
   location,
+  widgetType,
 }: {
   eventView: EventView;
   organization: Organization;
   location?: Location;
   query?: NewQuery;
+  widgetType?: WidgetType;
   yAxis?: string | string[];
 }) {
   const displayType = displayModeToDisplayType(eventView.display as DisplayModes);
@@ -798,8 +828,51 @@ export function constructAddQueryToDashboardLink({
     displayType,
     yAxis,
   });
+
   const defaultTitle =
     query?.name ?? (eventView.name !== 'All Events' ? eventView.name : undefined);
+
+  const limit =
+    displayType === DisplayType.TOP_N || eventView.display === DisplayModes.DAILYTOP5
+      ? Number(eventView.topEvents) || TOP_N
+      : undefined;
+
+  if (organization.features.includes('dashboards-widget-builder-redesign')) {
+    const widget: Widget = {
+      title: defaultTitle!,
+      displayType: displayType === DisplayType.TOP_N ? DisplayType.AREA : displayType,
+      widgetType,
+      limit,
+      interval: eventView.interval ?? '',
+      queries: [
+        {
+          ...defaultWidgetQuery,
+          aggregates: [...(typeof yAxis === 'string' ? [yAxis] : yAxis ?? ['count()'])],
+          fields: eventView.getFields(),
+          columns:
+            widgetType === WidgetType.SPANS ||
+            displayType === DisplayType.TOP_N ||
+            eventView.display === DisplayModes.DAILYTOP5
+              ? eventView
+                  .getFields()
+                  .filter(
+                    column => defined(column) && !isAggregateFieldOrEquation(column)
+                  )
+              : [],
+        },
+      ],
+    };
+    return {
+      pathname: `/organizations/${organization.slug}/dashboards/new/widget-builder/widget/new/`,
+      query: {
+        ...location?.query,
+        start: eventView.start,
+        end: eventView.end,
+        statsPeriod: eventView.statsPeriod,
+        ...convertWidgetToBuilderStateParams(widget),
+      },
+    };
+  }
 
   return {
     pathname: `/organizations/${organization.slug}/dashboards/new/widget/new/`,
@@ -813,10 +886,14 @@ export function constructAddQueryToDashboardLink({
       defaultTableColumns: defaultTableFields,
       defaultTitle,
       displayType: displayType === DisplayType.TOP_N ? DisplayType.AREA : displayType,
-      limit:
-        displayType === DisplayType.TOP_N
-          ? Number(eventView.topEvents) || TOP_N
-          : undefined,
+      dataset: widgetType,
+      field: eventView.getFields(),
+      limit,
     },
   };
 }
+
+export const SAVED_QUERY_DATASET_TO_WIDGET_TYPE = {
+  [SavedQueryDatasets.ERRORS]: WidgetType.ERRORS,
+  [SavedQueryDatasets.TRANSACTIONS]: WidgetType.TRANSACTIONS,
+};

@@ -31,6 +31,7 @@ class ActivityType(Enum):
     SET_ESCALATING = 25
 
     SET_PRIORITY = 26
+    DELETED_ATTACHMENT = 27
 
 
 # Warning: This must remain in this EXACT order.
@@ -63,5 +64,19 @@ CHOICES = tuple(
         ActivityType.AUTO_SET_ONGOING,  # 24
         ActivityType.SET_ESCALATING,  # 25
         ActivityType.SET_PRIORITY,  # 26
+        ActivityType.DELETED_ATTACHMENT,  # 27
     ]
+)
+
+
+STATUS_CHANGE_ACTIVITY_TYPES = (
+    ActivityType.SET_RESOLVED,
+    ActivityType.SET_UNRESOLVED,
+    ActivityType.SET_IGNORED,
+    ActivityType.SET_REGRESSION,
+    ActivityType.SET_RESOLVED_IN_RELEASE,
+    ActivityType.SET_RESOLVED_BY_AGE,
+    ActivityType.SET_RESOLVED_IN_COMMIT,
+    ActivityType.SET_RESOLVED_IN_PULL_REQUEST,
+    ActivityType.SET_ESCALATING,
 )

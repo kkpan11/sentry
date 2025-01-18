@@ -6,21 +6,21 @@ from typing import Any
 
 from django.urls import reverse
 
-from sentry.integrations.mixins import IssueBasicMixin
+from sentry.integrations.source_code_management.issues import SourceCodeIssueIntegration
 from sentry.models.group import Group
-from sentry.models.user import User
-from sentry.services.hybrid_cloud.util import all_silo_function
 from sentry.shared_integrations.exceptions import ApiError, ApiUnauthorized, IntegrationError
+from sentry.silo.base import all_silo_function
+from sentry.users.models.user import User
 from sentry.utils.http import absolute_uri
 
 ISSUE_EXTERNAL_KEY_FORMAT = re.compile(r".+:(.+)#(.+)")
 
 
-class GitlabIssueBasic(IssueBasicMixin):
+class GitlabIssuesSpec(SourceCodeIssueIntegration):
     def make_external_key(self, data):
         return "{}:{}".format(self.model.metadata["domain_name"], data["key"])
 
-    def get_issue_url(self, key):
+    def get_issue_url(self, key: str) -> str:
         match = ISSUE_EXTERNAL_KEY_FORMAT.match(key)
         project, issue_id = match.group(1), match.group(2)
         return "{}/{}/issues/{}".format(self.model.metadata["base_url"], project, issue_id)
@@ -115,9 +115,8 @@ class GitlabIssueBasic(IssueBasicMixin):
             return
 
         try:
-            client.create_issue_comment(
-                project_id=project_id, issue_id=issue_id, data={"body": comment}
-            )
+            # GitLab has projects which are equivalent to repos
+            client.create_comment(repo=project_id, issue_id=issue_id, data={"body": comment})
         except ApiError as e:
             raise IntegrationError(self.message_from_error(e))
 

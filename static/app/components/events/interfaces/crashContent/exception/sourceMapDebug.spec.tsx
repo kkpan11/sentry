@@ -5,7 +5,7 @@ import {ProjectFixture} from 'sentry-fixture/project';
 import {render, screen, userEvent} from 'sentry-test/reactTestingLibrary';
 import {textWithMarkupMatcher} from 'sentry-test/utils';
 
-import type {ExceptionValue} from 'sentry/types';
+import type {ExceptionValue} from 'sentry/types/event';
 import {trackAnalytics} from 'sentry/utils/analytics';
 
 import {SourceMapDebug} from './sourceMapDebug';
@@ -18,7 +18,7 @@ import {
 jest.mock('sentry/utils/analytics');
 
 describe('SourceMapDebug', () => {
-  const organization = OrganizationFixture({});
+  const organization = OrganizationFixture();
   const project = ProjectFixture();
   const eventId = '1ec1bd65b0b1484b97162087a652421b';
   const exceptionValues: ExceptionValue[] = [
@@ -76,7 +76,7 @@ describe('SourceMapDebug', () => {
 
   it('should use unqiue in app frames', () => {
     expect(debugFrames).toHaveLength(1);
-    expect(debugFrames[0].filename).toBe(
+    expect(debugFrames[0]!.filename).toBe(
       './app/views/organizationStats/teamInsights/controls.tsx'
     );
   });

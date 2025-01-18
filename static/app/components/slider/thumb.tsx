@@ -51,7 +51,7 @@ function BaseSliderThumb(
             transform: `translateX(${-state.getThumbPercent(index ?? 0) * 100}%)`,
           }}
         >
-          {getFormattedValue(state.values[index ?? 0])}
+          {getFormattedValue(state.values[index ?? 0]!)}
         </SliderThumbLabel>
       )}
       <VisuallyHidden>
@@ -134,6 +134,6 @@ const SliderThumbLabel = styled('span')`
   bottom: calc(100% + ${space(0.25)});
 
   font-size: ${p => p.theme.fontSizeSmall};
-  font-weight: 600;
+  font-weight: ${p => p.theme.fontWeightBold};
   font-variant-numeric: tabular-nums;
 `;

@@ -18,8 +18,9 @@ import IssueSyncListElement from 'sentry/components/issueSyncListElement';
 import Placeholder from 'sentry/components/placeholder';
 import * as SidebarSection from 'sentry/components/sidebarSection';
 import {t} from 'sentry/locale';
-import type {Group, Project} from 'sentry/types';
 import type {Event} from 'sentry/types/event';
+import type {Group} from 'sentry/types/group';
+import type {Project} from 'sentry/types/project';
 import useOrganization from 'sentry/utils/useOrganization';
 
 type Props = {
@@ -47,7 +48,7 @@ export default function ExternalIssueList({group, event, project}: Props) {
     );
   }
 
-  const renderers: Record<ExternalIssueType, (props) => ReactNode> = {
+  const renderers: Record<ExternalIssueType, (props: any) => ReactNode> = {
     'sentry-app-issue': ({sentryApp, ...props}: SentryAppIssueComponent['props']) => (
       <ErrorBoundary key={sentryApp.slug} mini>
         <SentryAppExternalIssueActions {...props} />
@@ -57,8 +58,8 @@ export default function ExternalIssueList({group, event, project}: Props) {
       <ExternalIssueActions {...props} />
     ),
     'plugin-action': ({plugin}: PluginActionComponent['props']) => (
-      <IssueSyncListElement externalIssueLink={plugin[1]}>
-        {plugin[0]}
+      <IssueSyncListElement externalIssueLink={(plugin as any)[1]}>
+        {(plugin as any)[0]}
       </IssueSyncListElement>
     ),
     'plugin-issue': (props: PluginIssueComponent['props']) => (
@@ -83,7 +84,6 @@ export default function ExternalIssueList({group, event, project}: Props) {
             {t('Track this issue in Jira, GitHub, etc.')}
           </AlertLink>
         )}
-        {}
       </SidebarSection.Content>
     </SidebarSection.Wrap>
   );

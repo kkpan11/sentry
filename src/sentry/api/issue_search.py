@@ -4,6 +4,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import partial
 from typing import Optional, Union
 
+from django.contrib.auth.models import AnonymousUser
+
 from sentry.api.event_search import (
     AggregateFilter,
     ParenExpression,
@@ -25,7 +27,6 @@ from sentry.models.group import GROUP_SUBSTATUS_TO_STATUS_MAP, STATUS_QUERY_CHOI
 from sentry.models.organization import Organization
 from sentry.models.project import Project
 from sentry.models.team import Team
-from sentry.models.user import User
 from sentry.search.events.constants import EQUALITY_OPERATORS, INEQUALITY_OPERATORS
 from sentry.search.events.filter import ParsedTerms, to_list
 from sentry.search.utils import (
@@ -37,8 +38,9 @@ from sentry.search.utils import (
     parse_substatus_value,
     parse_user_value,
 )
-from sentry.services.hybrid_cloud.user import RpcUser
 from sentry.types.group import SUBSTATUS_UPDATE_CHOICES, GroupSubStatus, PriorityLevel
+from sentry.users.models.user import User
+from sentry.users.services.user import RpcUser
 
 is_filter_translation = {
     "assigned": ("unassigned", False),
@@ -260,9 +262,10 @@ value_converters: Mapping[str, ValueConverter] = {
 def convert_query_values(
     search_filters: ParsedTerms,
     projects: Sequence[Project],
-    user: User | RpcUser | None,
+    user: User | RpcUser | AnonymousUser | None,
     environments: Sequence[Environment] | None,
     value_converters=value_converters,
+    allow_aggregate_filters=False,
 ) -> list[SearchFilter]:
     """
     Accepts a collection of SearchFilter objects and converts their values into
@@ -302,7 +305,7 @@ def convert_query_values(
                 value=SearchValue(new_value),
                 operator=operator,
             )
-        elif isinstance(search_filter, AggregateFilter):
+        elif isinstance(search_filter, AggregateFilter) and not allow_aggregate_filters:
             raise InvalidSearchQuery(
                 f"Aggregate filters ({search_filter.key.name}) are not supported in issue searches."
             )

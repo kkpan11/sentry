@@ -14,8 +14,8 @@ import QuestionTooltip from 'sentry/components/questionTooltip';
 import {IconWarning} from 'sentry/icons/iconWarning';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
 import type {Series} from 'sentry/types/echarts';
+import type {Organization} from 'sentry/types/organization';
 import type EventView from 'sentry/utils/discover/eventView';
 import {formatAbbreviatedNumber} from 'sentry/utils/formatters';
 import getDynamicText from 'sentry/utils/getDynamicText';
@@ -27,7 +27,8 @@ import {
 } from 'sentry/utils/performance/histogram/utils';
 
 import {DoubleHeaderContainer} from '../../styles';
-import {getFieldOrBackup} from '../display/utils';
+
+import {getFieldOrBackup} from './utils';
 
 const NUM_BUCKETS = 50;
 const PRECISION = 0;

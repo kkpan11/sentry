@@ -4,7 +4,9 @@ import {OrganizationFixture} from 'sentry-fixture/organization';
 import {PageFiltersFixture} from 'sentry-fixture/pageFilters';
 
 import {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
-import type {NewQuery, SavedQuery} from 'sentry/types';
+import ConfigStore from 'sentry/stores/configStore';
+import type {NewQuery, SavedQuery} from 'sentry/types/organization';
+import type {Config} from 'sentry/types/system';
 import type {MetaType} from 'sentry/utils/discover/eventView';
 import EventView, {
   isAPIPayloadSimilar,
@@ -16,21 +18,25 @@ import {
   DiscoverDatasets,
   DISPLAY_MODE_OPTIONS,
   DisplayModes,
+  SavedQueryDatasets,
 } from 'sentry/utils/discover/types';
 import {AggregationKey, WebVital} from 'sentry/utils/fields';
 import {SpanOperationBreakdownFilter} from 'sentry/views/performance/transactionSummary/filter';
 import {EventsDisplayFilterName} from 'sentry/views/performance/transactionSummary/transactionEvents/utils';
 
-const generateFields = fields =>
+const generateFields = (fields: string[]) =>
   fields.map(field => ({
     field,
   }));
 
-const generateSorts = sorts =>
-  sorts.map(sortName => ({
-    field: sortName,
-    kind: 'desc',
-  }));
+const generateSorts = (sorts: string[]) =>
+  sorts.map(
+    sortName =>
+      ({
+        field: sortName,
+        kind: 'desc',
+      }) as const
+  );
 
 const REQUIRED_CONSTRUCTOR_PROPS = {
   createdBy: undefined,
@@ -326,9 +332,9 @@ describe('EventView.fromSavedQuery()', function () {
       {field: 'title', width: COL_WIDTH_UNDEFINED},
     ]);
     expect(eventView.name).toEqual(saved.name);
-    expect(eventView.statsPeriod).toEqual('14d');
-    expect(eventView.start).toEqual(undefined);
-    expect(eventView.end).toEqual(undefined);
+    expect(eventView.statsPeriod).toBe('14d');
+    expect(eventView.start).toBeUndefined();
+    expect(eventView.end).toBeUndefined();
   });
 
   it('saved queries are equal when start and end datetime differ in format', function () {
@@ -1159,11 +1165,11 @@ describe('EventView.generateQueryStringObject()', function () {
       id: undefined,
       name: undefined,
       field: ['id', 'title'],
-      widths: [],
-      sort: [],
+      widths: undefined,
+      sort: undefined,
       query: '',
-      project: [],
-      environment: [],
+      project: undefined,
+      environment: undefined,
       display: 'previous',
       yAxis: 'count()',
     };
@@ -1198,14 +1204,14 @@ describe('EventView.generateQueryStringObject()', function () {
       id: '1234',
       name: 'best query',
       field: ['count()', 'project.id'],
-      widths: [123, 456],
-      sort: ['-count'],
+      widths: ['123', '456'],
+      sort: '-count',
       query: 'event.type:error',
-      project: [42],
+      project: '42',
       start: '2019-10-01T00:00:00',
       end: '2019-10-02T00:00:00',
       statsPeriod: '14d',
-      environment: ['staging'],
+      environment: 'staging',
       yAxis: 'count()',
       display: 'releases',
       interval: '1m',
@@ -1282,7 +1288,7 @@ describe('EventView.getEventsAPIPayload()', function () {
         query: 'TypeError',
       },
     });
-    expect(eventView.getEventsAPIPayload(location).query).toEqual('event.type:csp');
+    expect(eventView.getEventsAPIPayload(location).query).toBe('event.type:csp');
   });
 
   it('only includes at most one sort key', function () {
@@ -1297,7 +1303,7 @@ describe('EventView.getEventsAPIPayload()', function () {
       query: {},
     });
 
-    expect(eventView.getEventsAPIPayload(location).sort).toEqual('-title');
+    expect(eventView.getEventsAPIPayload(location).sort).toBe('-title');
   });
 
   it('only includes sort keys that are defined in fields', function () {
@@ -1312,7 +1318,7 @@ describe('EventView.getEventsAPIPayload()', function () {
       query: {},
     });
 
-    expect(eventView.getEventsAPIPayload(location).sort).toEqual('-count');
+    expect(eventView.getEventsAPIPayload(location).sort).toBe('-count');
   });
 
   it('only includes relevant query strings', function () {
@@ -1692,6 +1698,7 @@ describe('EventView.toNewQuery()', function () {
       environment: ['staging'],
       display: 'releases',
       dataset: DiscoverDatasets.DISCOVER,
+      queryDataset: SavedQueryDatasets.DISCOVER,
     };
 
     expect(output).toEqual(expected);
@@ -1722,6 +1729,7 @@ describe('EventView.toNewQuery()', function () {
       environment: ['staging'],
       display: 'releases',
       dataset: DiscoverDatasets.DISCOVER,
+      queryDataset: SavedQueryDatasets.DISCOVER,
     };
 
     expect(output).toEqual(expected);
@@ -1752,6 +1760,7 @@ describe('EventView.toNewQuery()', function () {
       environment: ['staging'],
       display: 'releases',
       dataset: DiscoverDatasets.DISCOVER,
+      queryDataset: SavedQueryDatasets.DISCOVER,
     };
 
     expect(output).toEqual(expected);
@@ -2021,8 +2030,8 @@ describe('EventView.withColumns()', function () {
       {field: 'project.id', width: 99},
     ]);
 
-    expect(eventView.yAxis).toEqual('failure_count()');
-    expect(newView.yAxis).toEqual('count()');
+    expect(eventView.yAxis).toBe('failure_count()');
+    expect(newView.yAxis).toBe('count()');
   });
 });
 
@@ -2128,8 +2137,8 @@ describe('EventView.withResizedColumn()', function () {
 
   it('updates a column that exists', function () {
     const newView = view.withResizedColumn(0, 99);
-    expect(view.fields[0].width).toBeUndefined();
-    expect(newView.fields[0].width).toEqual(99);
+    expect(view.fields[0]!.width).toBeUndefined();
+    expect(newView.fields[0]!.width).toBe(99);
   });
 
   it('ignores columns that do not exist', function () {
@@ -2484,7 +2493,7 @@ describe('EventView.withDeletedColumn()', function () {
     it('sorted column occurs at least twice', function () {
       const modifiedState: ConstructorParameters<typeof EventView>[0] = {
         ...state,
-        fields: [...state.fields, state.fields[0]],
+        fields: [...state.fields, state.fields[0]!],
       };
 
       const eventView = new EventView(modifiedState);
@@ -2560,10 +2569,10 @@ describe('EventView.getQuery()', function () {
       query: 'event.type:error',
     });
 
-    expect(eventView.getQuery()).toEqual('event.type:error');
-    expect(eventView.getQuery(null)).toEqual('event.type:error');
-    expect(eventView.getQuery('hello')).toEqual('event.type:error hello');
-    expect(eventView.getQuery(['event.type:error', 'hello'])).toEqual(
+    expect(eventView.getQuery()).toBe('event.type:error');
+    expect(eventView.getQuery(null)).toBe('event.type:error');
+    expect(eventView.getQuery('hello')).toBe('event.type:error hello');
+    expect(eventView.getQuery(['event.type:error', 'hello'])).toBe(
       'event.type:error hello'
     );
   });
@@ -2576,10 +2585,10 @@ describe('EventView.getQuery()', function () {
       project: [],
     });
 
-    expect(eventView.getQuery()).toEqual('');
-    expect(eventView.getQuery(null)).toEqual('');
-    expect(eventView.getQuery('hello')).toEqual('hello');
-    expect(eventView.getQuery(['event.type:error', 'hello'])).toEqual(
+    expect(eventView.getQuery()).toBe('');
+    expect(eventView.getQuery(null)).toBe('');
+    expect(eventView.getQuery('hello')).toBe('hello');
+    expect(eventView.getQuery(['event.type:error', 'hello'])).toBe(
       'event.type:error hello'
     );
   });
@@ -2597,7 +2606,7 @@ describe('EventView.getQueryWithAdditionalConditions', function () {
 
     eventView.additionalConditions.setFilterValues('event.type', ['transaction']);
 
-    expect(eventView.getQueryWithAdditionalConditions()).toEqual(
+    expect(eventView.getQueryWithAdditionalConditions()).toBe(
       'event.type:transaction foo:bar'
     );
   });
@@ -2671,7 +2680,7 @@ describe('EventView.sortOnField()', function () {
     const eventView = new EventView(state);
     expect(eventView).toMatchObject(state);
 
-    const field = state.fields[1];
+    const field = state.fields[1]!;
 
     const eventView2 = eventView.sortOnField(field, meta);
     expect(eventView2 === eventView).toBe(true);
@@ -2681,7 +2690,7 @@ describe('EventView.sortOnField()', function () {
     const eventView = new EventView(state);
     expect(eventView).toMatchObject(state);
 
-    const field = state.fields[0];
+    const field = state.fields[0]!;
 
     const eventView2 = eventView.sortOnField(field, meta);
 
@@ -2699,7 +2708,7 @@ describe('EventView.sortOnField()', function () {
     const eventView = new EventView(state);
     expect(eventView).toMatchObject(state);
 
-    const field = state.fields[0];
+    const field = state.fields[0]!;
 
     const eventView2 = eventView.sortOnField(field, meta, 'asc');
     expect(eventView2).toMatchObject({
@@ -2745,7 +2754,7 @@ describe('EventView.sortOnField()', function () {
     const eventView = new EventView(modifiedState);
     expect(eventView).toMatchObject(modifiedState);
 
-    const field = modifiedState.fields[2];
+    const field = modifiedState.fields[2]!;
 
     const eventView2 = eventView.sortOnField(field, meta);
 
@@ -2786,7 +2795,7 @@ describe('EventView.sortOnField()', function () {
     const eventView = new EventView(modifiedState);
     expect(eventView).toMatchObject(modifiedState);
 
-    const field = modifiedState.fields[2];
+    const field = modifiedState.fields[2]!;
 
     let sortedEventView = eventView.sortOnField(field, meta, undefined, true);
     expect(sortedEventView.sorts).toEqual([{field: 'count()', kind: 'asc'}]);
@@ -2922,7 +2931,10 @@ describe('EventView.isEqualTo()', function () {
     const eventView = new EventView(state);
 
     for (const key in differences) {
-      const eventView2 = new EventView({...state, [key]: differences[key]});
+      const eventView2 = new EventView({
+        ...state,
+        [key]: differences[key as keyof typeof differences],
+      });
       expect(eventView.isEqualTo(eventView2)).toBe(false);
     }
   });
@@ -2949,22 +2961,22 @@ describe('EventView.isEqualTo()', function () {
 });
 
 describe('EventView.getResultsViewUrlTarget()', function () {
+  let configState: Config;
+
   beforeEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
+    configState = ConfigStore.getState();
+    ConfigStore.loadInitialData({
+      ...configState,
       customerDomain: {
         subdomain: 'albertos-apples',
         organizationUrl: 'https://albertos-apples.sentry.io',
         sentryUrl: 'https://sentry.io',
       },
-    };
+    });
   });
 
   afterEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
-      customerDomain: null,
-    };
+    ConfigStore.loadInitialData(configState);
   });
 
   const state: ConstructorParameters<typeof EventView>[0] = {
@@ -2985,42 +2997,42 @@ describe('EventView.getResultsViewUrlTarget()', function () {
   const organization = OrganizationFixture();
 
   it('generates a URL with non-customer domain context', function () {
-    window.__initialData.customerDomain = null;
+    ConfigStore.set('customerDomain', null);
     const view = new EventView(state);
     const result = view.getResultsViewUrlTarget(organization.slug);
-    expect(result.pathname).toEqual('/organizations/org-slug/discover/results/');
+    expect(result.pathname).toBe('/organizations/org-slug/discover/results/');
     expect(result.query.query).toEqual(state.query);
-    expect(result.query.project).toEqual(state.project);
+    expect(result.query.project).toBe('42');
     expect(result.query.display).toEqual(state.display);
   });
 
   it('generates a URL with customer domain context', function () {
     const view = new EventView(state);
     const result = view.getResultsViewUrlTarget(organization.slug);
-    expect(result.pathname).toEqual('/discover/results/');
+    expect(result.pathname).toBe('/discover/results/');
     expect(result.query.query).toEqual(state.query);
-    expect(result.query.project).toEqual(state.project);
+    expect(result.query.project).toBe('42');
     expect(result.query.display).toEqual(state.display);
   });
 });
 
 describe('EventView.getResultsViewShortUrlTarget()', function () {
+  let configState: Config;
+
   beforeEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
+    configState = ConfigStore.getState();
+    ConfigStore.loadInitialData({
+      ...configState,
       customerDomain: {
         subdomain: 'albertos-apples',
         organizationUrl: 'https://albertos-apples.sentry.io',
         sentryUrl: 'https://sentry.io',
       },
-    };
+    });
   });
 
   afterEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
-      customerDomain: null,
-    };
+    ConfigStore.loadInitialData(configState);
   });
 
   const state: ConstructorParameters<typeof EventView>[0] = {
@@ -3041,50 +3053,51 @@ describe('EventView.getResultsViewShortUrlTarget()', function () {
   const organization = OrganizationFixture();
 
   it('generates a URL with non-customer domain context', function () {
-    window.__initialData.customerDomain = null;
+    ConfigStore.set('customerDomain', null);
+
     const view = new EventView(state);
     const result = view.getResultsViewShortUrlTarget(organization.slug);
-    expect(result.pathname).toEqual('/organizations/org-slug/discover/results/');
+    expect(result.pathname).toBe('/organizations/org-slug/discover/results/');
     expect(result.query).not.toHaveProperty('name');
     expect(result.query).not.toHaveProperty('fields');
     expect(result.query).not.toHaveProperty('query');
     expect(result.query.id).toEqual(state.id);
     expect(result.query.statsPeriod).toEqual(state.statsPeriod);
-    expect(result.query.project).toEqual(state.project);
-    expect(result.query.environment).toEqual(state.environment);
+    expect(result.query.project).toBe('42');
+    expect(result.query.environment).toBe('staging');
   });
 
   it('generates a URL with customer domain context', function () {
     const view = new EventView(state);
     const result = view.getResultsViewShortUrlTarget(organization.slug);
-    expect(result.pathname).toEqual('/discover/results/');
+    expect(result.pathname).toBe('/discover/results/');
     expect(result.query).not.toHaveProperty('name');
     expect(result.query).not.toHaveProperty('fields');
     expect(result.query).not.toHaveProperty('query');
     expect(result.query.id).toEqual(state.id);
     expect(result.query.statsPeriod).toEqual(state.statsPeriod);
-    expect(result.query.project).toEqual(state.project);
-    expect(result.query.environment).toEqual(state.environment);
+    expect(result.query.project).toBe('42');
+    expect(result.query.environment).toBe('staging');
   });
 });
 
 describe('EventView.getPerformanceTransactionEventsViewUrlTarget()', function () {
+  let configState: Config;
+
   beforeEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
+    configState = ConfigStore.getState();
+    ConfigStore.loadInitialData({
+      ...configState,
       customerDomain: {
         subdomain: 'albertos-apples',
         organizationUrl: 'https://albertos-apples.sentry.io',
         sentryUrl: 'https://sentry.io',
       },
-    };
+    });
   });
 
   afterEach(function () {
-    window.__initialData = {
-      ...window.__initialData,
-      customerDomain: null,
-    };
+    ConfigStore.loadInitialData(configState);
   });
 
   const state: ConstructorParameters<typeof EventView>[0] = {
@@ -3108,19 +3121,17 @@ describe('EventView.getPerformanceTransactionEventsViewUrlTarget()', function ()
   const webVital = WebVital.LCP;
 
   it('generates a URL with non-customer domain context', function () {
-    window.__initialData.customerDomain = null;
+    ConfigStore.set('customerDomain', null);
     const view = new EventView(state);
     const result = view.getPerformanceTransactionEventsViewUrlTarget(organization.slug, {
       showTransactions,
       breakdown,
       webVital,
     });
-    expect(result.pathname).toEqual(
-      '/organizations/org-slug/performance/summary/events/'
-    );
+    expect(result.pathname).toBe('/organizations/org-slug/performance/summary/events/');
     expect(result.query.query).toEqual(state.query);
-    expect(result.query.project).toEqual(state.project);
-    expect(result.query.sort).toEqual(['-count']);
+    expect(result.query.project).toBe('42');
+    expect(result.query.sort).toBe('-count');
     expect(result.query.transaction).toEqual(state.name);
     expect(result.query.showTransactions).toEqual(showTransactions);
     expect(result.query.breakdown).toEqual(breakdown);
@@ -3134,10 +3145,10 @@ describe('EventView.getPerformanceTransactionEventsViewUrlTarget()', function ()
       breakdown,
       webVital,
     });
-    expect(result.pathname).toEqual('/performance/summary/events/');
+    expect(result.pathname).toBe('/performance/summary/events/');
     expect(result.query.query).toEqual(state.query);
-    expect(result.query.project).toEqual(state.project);
-    expect(result.query.sort).toEqual(['-count']);
+    expect(result.query.project).toBe('42');
+    expect(result.query.sort).toBe('-count');
     expect(result.query.transaction).toEqual(state.name);
     expect(result.query.showTransactions).toEqual(showTransactions);
     expect(result.query.breakdown).toEqual(breakdown);
@@ -3270,7 +3281,7 @@ describe('EventView.getYAxisOptions()', function () {
     environment: [],
   };
 
-  function generateYaxis(value) {
+  function generateYaxis(value: any) {
     return {
       value,
       label: value,
@@ -3335,7 +3346,7 @@ describe('EventView.getYAxis()', function () {
   it('should return first default yAxis', function () {
     const thisEventView = new EventView(state);
 
-    expect(thisEventView.getYAxis()).toEqual('count()');
+    expect(thisEventView.getYAxis()).toBe('count()');
   });
 
   it('should return valid yAxis', function () {
@@ -3345,7 +3356,7 @@ describe('EventView.getYAxis()', function () {
       yAxis: 'count_unique(user)',
     });
 
-    expect(thisEventView.getYAxis()).toEqual('count_unique(user)');
+    expect(thisEventView.getYAxis()).toBe('count_unique(user)');
   });
 
   it('should ignore invalid yAxis', function () {
@@ -3363,7 +3374,7 @@ describe('EventView.getYAxis()', function () {
       });
 
       // yAxis defaults to the first entry of the default yAxis options
-      expect(thisEventView.getYAxis()).toEqual('count()');
+      expect(thisEventView.getYAxis()).toBe('count()');
     }
   });
 });
@@ -3397,8 +3408,8 @@ describe('EventView.getDisplayOptions()', function () {
     });
 
     const options = eventView.getDisplayOptions();
-    expect(options[1].value).toEqual('previous');
-    expect(options[1].disabled).toBeTruthy();
+    expect(options[1]!.value).toBe('previous');
+    expect(options[1]!.disabled).toBeTruthy();
   });
 
   it('should disable top 5 period/daily if no aggregates present', function () {
@@ -3407,10 +3418,10 @@ describe('EventView.getDisplayOptions()', function () {
     });
 
     const options = eventView.getDisplayOptions();
-    expect(options[2].value).toEqual('top5');
-    expect(options[2].disabled).toBeTruthy();
-    expect(options[4].value).toEqual('dailytop5');
-    expect(options[4].disabled).toBeTruthy();
+    expect(options[2]!.value).toBe('top5');
+    expect(options[2]!.disabled).toBeTruthy();
+    expect(options[4]!.value).toBe('dailytop5');
+    expect(options[4]!.disabled).toBeTruthy();
   });
 });
 
@@ -3590,7 +3601,7 @@ describe('isAPIPayloadSimilar', function () {
       });
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = thisEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3607,7 +3618,7 @@ describe('isAPIPayloadSimilar', function () {
       });
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = thisEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3617,11 +3628,11 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is not similar on sort key sorted in opposite directions', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const otherEventView = thisEventView.sortOnField({field: 'count()'}, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3631,14 +3642,14 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is not similar when a new column is added', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const otherEventView = new EventView({
         ...state,
         fields: [...state.fields, {field: 'title', width: COL_WIDTH_UNDEFINED}],
       });
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3648,7 +3659,7 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is similar when a column is updated with no changes', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const newColumn: Column = {
@@ -3657,7 +3668,7 @@ describe('isAPIPayloadSimilar', function () {
       };
 
       const otherEventView = thisEventView.withUpdatedColumn(0, newColumn, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3667,7 +3678,7 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is not similar when a column is updated with a replaced field', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const newColumn: Column = {
@@ -3676,7 +3687,7 @@ describe('isAPIPayloadSimilar', function () {
       };
 
       const otherEventView = thisEventView.withUpdatedColumn(0, newColumn, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3686,7 +3697,7 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is not similar when a column is updated with a replaced aggregation', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const newColumn: Column = {
@@ -3695,7 +3706,7 @@ describe('isAPIPayloadSimilar', function () {
       };
 
       const otherEventView = thisEventView.withUpdatedColumn(0, newColumn, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3705,7 +3716,7 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is similar when a column is renamed', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const newColumn: Column = {
@@ -3714,7 +3725,7 @@ describe('isAPIPayloadSimilar', function () {
       };
 
       const otherEventView = thisEventView.withUpdatedColumn(0, newColumn, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3724,11 +3735,11 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is not similar when a column is deleted', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const otherEventView = thisEventView.withDeletedColumn(0, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3738,11 +3749,11 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is similar if column order changes', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       const otherEventView = new EventView({...state, fields: shuffle(state.fields)});
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3760,7 +3771,7 @@ describe('isAPIPayloadSimilar', function () {
         otherEquationField,
       ];
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       state.fields = [
@@ -3770,7 +3781,7 @@ describe('isAPIPayloadSimilar', function () {
         otherEquationField,
       ];
       const otherEventView = new EventView(state);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3788,7 +3799,7 @@ describe('isAPIPayloadSimilar', function () {
         otherEquationField,
       ];
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getEventsAPIPayload(location);
 
       state.fields = [
@@ -3798,7 +3809,7 @@ describe('isAPIPayloadSimilar', function () {
         equationField,
       ];
       const otherEventView = new EventView(state);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getEventsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3810,7 +3821,7 @@ describe('isAPIPayloadSimilar', function () {
   describe('getFacetsAPIPayload', function () {
     it('only includes relevant parameters', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const results = thisEventView.getFacetsAPIPayload(location);
       const expected = {
         query: state.query,
@@ -3824,7 +3835,7 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is similar on sort key sorted in opposite directions', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getFacetsAPIPayload(location);
 
       const newColumn: Column = {
@@ -3833,7 +3844,7 @@ describe('isAPIPayloadSimilar', function () {
       };
 
       const otherEventView = thisEventView.withUpdatedColumn(0, newColumn, meta);
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getFacetsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);
@@ -3842,14 +3853,14 @@ describe('isAPIPayloadSimilar', function () {
 
     it('is similar when a columns are different', function () {
       const thisEventView = new EventView(state);
-      const location = LocationFixture({});
+      const location = LocationFixture();
       const thisAPIPayload = thisEventView.getFacetsAPIPayload(location);
 
       const otherEventView = new EventView({
         ...state,
         fields: [...state.fields, {field: 'title', width: COL_WIDTH_UNDEFINED}],
       });
-      const otherLocation = LocationFixture({});
+      const otherLocation = LocationFixture();
       const otherAPIPayload = otherEventView.getFacetsAPIPayload(otherLocation);
 
       const results = isAPIPayloadSimilar(thisAPIPayload, otherAPIPayload);

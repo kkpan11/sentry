@@ -1,18 +1,12 @@
-from functools import cached_property
-
-from django.urls import reverse
-
+from sentry.integrations.utils.providers import get_provider_string
 from sentry.models.organizationmember import OrganizationMember
 from sentry.models.organizationmemberteam import OrganizationMemberTeam
 from sentry.models.projectteam import ProjectTeam
 from sentry.models.team import Team
 from sentry.slug.errors import DEFAULT_SLUG_ERROR_MESSAGE
 from sentry.testutils.cases import APITestCase
-from sentry.testutils.silo import region_silo_test
-from sentry.types.integrations import get_provider_string
 
 
-@region_silo_test
 class OrganizationTeamsListTest(APITestCase):
     def test_simple(self):
         user = self.create_user()
@@ -168,7 +162,6 @@ class OrganizationTeamsListTest(APITestCase):
         assert response.status_code == 200, response.content
 
 
-@region_silo_test
 class OrganizationTeamsCreateTest(APITestCase):
     endpoint = "sentry-api-0-organization-teams"
     method = "post"
@@ -176,10 +169,6 @@ class OrganizationTeamsCreateTest(APITestCase):
     def setUp(self):
         super().setUp()
         self.login_as(user=self.user)
-
-    @cached_property
-    def path(self):
-        return reverse("sentry-api-0-organization-teams", args=[self.organization.slug])
 
     def test_missing_permission(self):
         user = self.create_user()

@@ -2,7 +2,7 @@ import {doEventsRequest} from 'sentry/actionCreators/events';
 import {addErrorMessage} from 'sentry/actionCreators/indicator';
 import EventsRequest from 'sentry/components/charts/eventsRequest';
 import {t} from 'sentry/locale';
-import type {EventsStats, MultiSeriesEventsStats} from 'sentry/types';
+import type {EventsStats, MultiSeriesEventsStats} from 'sentry/types/organization';
 
 export class OnDemandMetricRequest extends EventsRequest {
   fetchExtrapolatedData = async (): Promise<EventsStats> => {
@@ -31,7 +31,7 @@ export class OnDemandMetricRequest extends EventsRequest {
       errored: false,
       errorMessage: undefined,
     }));
-    let errorMessage;
+    let errorMessage: any;
     if (expired) {
       errorMessage = t(
         '%s has an invalid date range. Please try a more recent date range.',

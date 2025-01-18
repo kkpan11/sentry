@@ -5,7 +5,7 @@ import uniqBy from 'lodash/uniqBy';
 
 import type {Client} from 'sentry/api';
 import ProjectsStore from 'sentry/stores/projectsStore';
-import type {AvatarProject, Project} from 'sentry/types';
+import type {AvatarProject, Project} from 'sentry/types/project';
 import {defined} from 'sentry/utils';
 import getDaysSinceDate from 'sentry/utils/getDaysSinceDate';
 import parseLinkHeader from 'sentry/utils/parseLinkHeader';
@@ -370,7 +370,7 @@ class BaseProjects extends Component<Props, State> {
       });
 
       this.setState((state: State) => {
-        let fetchedProjects;
+        let fetchedProjects: any;
         if (append) {
           // Remove duplicates
           fetchedProjects = uniqBy(
@@ -469,7 +469,7 @@ async function fetchProjects(
     query?: string;
   } = {
     // Never return latestDeploys project property from api
-    collapse: ['latestDeploys'],
+    collapse: ['latestDeploys', 'unusedFeatures'],
   };
 
   if (slugs?.length) {
@@ -515,8 +515,8 @@ async function fetchProjects(
     const paginationObject = parseLinkHeader(pageLinks);
     hasMore =
       paginationObject &&
-      (paginationObject.next.results || paginationObject.previous.results);
-    nextCursor = paginationObject.next.cursor;
+      (paginationObject.next!.results || paginationObject.previous!.results);
+    nextCursor = paginationObject.next!.cursor;
   }
 
   // populate the projects store if all projects were fetched

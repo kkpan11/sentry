@@ -1,10 +1,13 @@
 import type {Location} from 'history';
 
 import {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
+import ExternalLink from 'sentry/components/links/externalLink';
 import {wrapQueryInWildcards} from 'sentry/components/performance/searchBar';
 import {ALL_ACCESS_PROJECTS} from 'sentry/constants/pageFilters';
-import {t} from 'sentry/locale';
-import type {NewQuery, Organization, Project, SelectValue} from 'sentry/types';
+import {t, tct} from 'sentry/locale';
+import type {SelectValue} from 'sentry/types/core';
+import type {NewQuery, Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import EventView from 'sentry/utils/discover/eventView';
 import {WEB_VITAL_DETAILS} from 'sentry/utils/performance/vitals/constants';
 import {decodeScalar} from 'sentry/utils/queryString';
@@ -34,10 +37,19 @@ export const COLUMN_TITLES = [
   'user misery',
 ];
 
+export const USER_MISERY_TOOLTIP = tct(
+  'A configurable score telling you how frequently users are frustrated by your application performance. [link:Learn more.]',
+  {
+    link: (
+      <ExternalLink href="https://docs.sentry.io/product/performance/metrics/#user-misery" />
+    ),
+  }
+);
+
 const TOKEN_KEYS_SUPPORTED_IN_LIMITED_SEARCH = ['transaction'];
 
 export const getDefaultStatsPeriod = (organization: Organization) => {
-  if (organization?.features?.includes('performance-landing-page-stats-period')) {
+  if (organization.features.includes('performance-landing-page-stats-period')) {
     return '14d';
   }
   return DEFAULT_STATS_PERIOD;
@@ -71,6 +83,8 @@ export enum PerformanceTerm {
   TIME_TO_INITIAL_DISPLAY = 'timeToInitialDisplay',
   MOST_TIME_SPENT_DB_QUERIES = 'mostTimeSpentDbQueries',
   MOST_TIME_CONSUMING_RESOURCES = 'mostTimeConsumingResources',
+  MOST_TIME_CONSUMING_DOMAINS = 'mostTimeConsumingDomains',
+  HIGHEST_CACHE_MISS_RATE_TRANSACTIONS = 'highestCacheMissRateTransactions',
 }
 
 export type TooltipOption = SelectValue<string> & {
@@ -383,6 +397,10 @@ export const PERFORMANCE_TERMS: Record<PerformanceTerm, TermFormatter> = {
     t('Database spans on which the application spent most of its total time.'),
   mostTimeConsumingResources: () =>
     t('Render blocking resources on which the application spent most of its total time.'),
+  mostTimeConsumingDomains: () =>
+    t('Outgoing HTTP domains on which the application spent most of its total time.'),
+  highestCacheMissRateTransactions: () =>
+    t('Transactions with the highest cache miss rate.'),
   slowHTTPSpans: () => t('The transactions with the slowest spans of a certain type.'),
   stallPercentage: () =>
     t(
@@ -406,7 +424,7 @@ export function getTermHelp(
   return PERFORMANCE_TERMS[term](organization);
 }
 
-export function prepareQueryForLandingPage(searchQuery, withStaticFilters) {
+export function prepareQueryForLandingPage(searchQuery: any, withStaticFilters: any) {
   const conditions = new MutableSearch(searchQuery);
 
   // If there is a bare text search, we want to treat it as a search
@@ -430,7 +448,7 @@ export function prepareQueryForLandingPage(searchQuery, withStaticFilters) {
   return conditions.formatString();
 }
 
-function generateGenericPerformanceEventView(
+export function generateGenericPerformanceEventView(
   location: Location,
   withStaticFilters: boolean,
   organization: Organization
@@ -481,6 +499,7 @@ function generateGenericPerformanceEventView(
     // be present in location and will not be determined based on the project type
     const trendParameter = getCurrentTrendParameter(location, [], []);
     if (
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       WEB_VITAL_DETAILS[trendParameter.column] &&
       !organization.features.includes('performance-new-trends')
     ) {
@@ -491,7 +510,7 @@ function generateGenericPerformanceEventView(
   return eventView;
 }
 
-function generateBackendPerformanceEventView(
+export function generateBackendPerformanceEventView(
   location: Location,
   withStaticFilters: boolean,
   organization: Organization
@@ -500,10 +519,10 @@ function generateBackendPerformanceEventView(
 
   const fields = [
     'team_key_transaction',
-    'transaction',
-    'project',
-    'transaction.op',
     'http.method',
+    'transaction',
+    'transaction.op',
+    'project',
     'tpm()',
     'p50()',
     'p95()',
@@ -543,7 +562,7 @@ function generateBackendPerformanceEventView(
   return eventView;
 }
 
-function generateMobilePerformanceEventView(
+export function generateMobilePerformanceEventView(
   location: Location,
   projects: Project[],
   genericEventView: EventView,
@@ -555,8 +574,8 @@ function generateMobilePerformanceEventView(
   const fields = [
     'team_key_transaction',
     'transaction',
-    'project',
     'transaction.op',
+    'project',
     'tpm()',
     'p75(measurements.frames_slow_rate)',
     'p75(measurements.frames_frozen_rate)',
@@ -661,7 +680,7 @@ function generateFrontendPageloadPerformanceEventView(
   return eventView;
 }
 
-function generateFrontendOtherPerformanceEventView(
+export function generateFrontendOtherPerformanceEventView(
   location: Location,
   withStaticFilters: boolean,
   organization: Organization
@@ -671,8 +690,8 @@ function generateFrontendOtherPerformanceEventView(
   const fields = [
     'team_key_transaction',
     'transaction',
-    'project',
     'transaction.op',
+    'project',
     'tpm()',
     'p50(transaction.duration)',
     'p75(transaction.duration)',

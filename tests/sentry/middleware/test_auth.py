@@ -3,16 +3,16 @@ from unittest.mock import patch
 
 from django.test import RequestFactory
 
+from sentry.auth.services.auth import AuthenticatedToken
 from sentry.middleware.auth import AuthenticationMiddleware
 from sentry.models.apikey import ApiKey
 from sentry.models.apitoken import ApiToken
-from sentry.models.userip import UserIP
-from sentry.services.hybrid_cloud.auth import AuthenticatedToken
-from sentry.services.hybrid_cloud.user.service import user_service
-from sentry.silo import SiloMode
+from sentry.silo.base import SiloMode
 from sentry.testutils.cases import TestCase
 from sentry.testutils.outbox import outbox_runner
 from sentry.testutils.silo import all_silo_test, assume_test_silo_mode
+from sentry.users.models.userip import UserIP
+from sentry.users.services.user.service import user_service
 from sentry.utils.auth import login
 
 
@@ -23,13 +23,6 @@ class AuthenticationMiddlewareTestCase(TestCase):
     def assert_user_equals(self, request):
         assert request.user == user_service.get_user(user_id=self.user.id)
 
-    def setUp(self):
-        from django.core.cache import cache
-
-        cache.clear()
-        yield
-        cache.clear()
-
     @cached_property
     def request(self):
         rv = RequestFactory().get("/")
@@ -39,6 +32,7 @@ class AuthenticationMiddlewareTestCase(TestCase):
     def test_process_request_anon(self):
         self.middleware.process_request(self.request)
         assert self.request.user.is_anonymous
+        assert self.request.auth is None
 
     def test_process_request_user(self):
         request = self.request
@@ -144,7 +138,7 @@ class AuthenticationMiddlewareTestCase(TestCase):
         assert request.user.is_anonymous
         assert request.auth is None
 
-    @patch("sentry.models.userip.geo_by_addr")
+    @patch("sentry.users.models.userip.geo_by_addr")
     def test_process_request_log_userip(self, mock_geo_by_addr):
         mock_geo_by_addr.return_value = {
             "country_code": "US",

@@ -1,11 +1,14 @@
+from unittest.mock import patch
+
+import orjson
 import pytest
 import responses
 
+from sentry.integrations.types import EventLifecycleOutcome
 from sentry.models.rule import Rule
+from sentry.testutils.asserts import assert_slo_metric
 from sentry.testutils.cases import APITestCase
-from sentry.testutils.silo import region_silo_test
 from sentry.testutils.skips import requires_snuba
-from sentry.utils import json
 
 pytestmark = [requires_snuba]
 
@@ -17,7 +20,6 @@ METADATA = {
 }
 
 
-@region_silo_test
 class OpsgenieClientTest(APITestCase):
     def setUp(self) -> None:
         self.login_as(self.user)
@@ -48,23 +50,8 @@ class OpsgenieClientTest(APITestCase):
         assert client.integration_key == METADATA["api_key"]
 
     @responses.activate
-    def test_authorize_integration(self):
-        client = self.installation.get_keyring_client("team-123")
-
-        resp_data = {
-            "result": "Integration [sentry] is valid",
-            "took": 1,
-            "requestId": "hello-world",
-        }
-        responses.add(
-            responses.POST, url=f"{client.base_url}/integrations/authenticate", json=resp_data
-        )
-
-        resp = client.authorize_integration(type="sentry")
-        assert resp == resp_data
-
-    @responses.activate
-    def test_send_notification(self):
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_send_notification(self, mock_record):
         resp_data = {
             "result": "Request will be processed",
             "took": 1,
@@ -90,7 +77,7 @@ class OpsgenieClientTest(APITestCase):
             client.send_notification(event, "P2", [rule])
 
         request = responses.calls[0].request
-        payload = json.loads(request.body)
+        payload = orjson.loads(request.body)
         group_id = str(group.id)
         assert payload == {
             "tags": ["level:warning"],
@@ -112,3 +99,4 @@ class OpsgenieClientTest(APITestCase):
             "message": "Hello world",
             "source": "Sentry",
         }
+        assert_slo_metric(mock_record, EventLifecycleOutcome.SUCCESS)

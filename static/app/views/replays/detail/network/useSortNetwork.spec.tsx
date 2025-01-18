@@ -1,4 +1,3 @@
-import {act} from 'react-test-renderer';
 import {
   ReplayNavigationFrameFixture,
   ReplayNavigationPushFrameFixture,
@@ -7,22 +6,21 @@ import {
 } from 'sentry-fixture/replay/replaySpanFrameData';
 import {ReplayRecordFixture} from 'sentry-fixture/replayRecord';
 
-import {reactHooks} from 'sentry-test/reactTestingLibrary';
+import {act, renderHook} from 'sentry-test/reactTestingLibrary';
 
 import hydrateSpans from 'sentry/utils/replays/hydrateSpans';
 
 import useSortNetwork from './useSortNetwork';
 
-jest.mock('react-router');
 jest.mock('sentry/utils/useUrlParams', () => {
   const map = new Map();
-  return (name, dflt) => {
+  return (name: string, dflt: string) => {
     if (!map.has(name)) {
       map.set(name, dflt);
     }
     return {
       getParamValue: () => map.get(name),
-      setParamValue: value => {
+      setParamValue: (value: string) => {
         map.set(name, value);
       },
     };
@@ -114,19 +112,19 @@ const [
 
 describe('useSortNetwork', () => {
   const items = [
-    SPAN_0_NAVIGATE,
-    SPAN_1_LINK,
-    SPAN_2_SCRIPT,
-    SPAN_3_FETCH,
-    SPAN_4_IMG,
-    SPAN_5_CSS,
-    SPAN_6_PUSH,
-    SPAN_7_FETCH_GET,
-    SPAN_8_FETCH_POST,
+    SPAN_0_NAVIGATE!,
+    SPAN_1_LINK!,
+    SPAN_2_SCRIPT!,
+    SPAN_3_FETCH!,
+    SPAN_4_IMG!,
+    SPAN_5_CSS!,
+    SPAN_6_PUSH!,
+    SPAN_7_FETCH_GET!,
+    SPAN_8_FETCH_POST!,
   ];
 
   it('should the list by timestamp by default', () => {
-    const {result} = reactHooks.renderHook(useSortNetwork, {
+    const {result} = renderHook(useSortNetwork, {
       initialProps: {items},
     });
 
@@ -136,20 +134,20 @@ describe('useSortNetwork', () => {
       getValue: expect.any(Function),
     });
     expect(result.current.items).toStrictEqual([
-      SPAN_5_CSS,
-      SPAN_4_IMG,
-      SPAN_3_FETCH,
-      SPAN_2_SCRIPT,
-      SPAN_1_LINK,
-      SPAN_0_NAVIGATE,
-      SPAN_6_PUSH,
-      SPAN_7_FETCH_GET,
-      SPAN_8_FETCH_POST,
+      SPAN_5_CSS!,
+      SPAN_4_IMG!,
+      SPAN_3_FETCH!,
+      SPAN_2_SCRIPT!,
+      SPAN_1_LINK!,
+      SPAN_0_NAVIGATE!,
+      SPAN_6_PUSH!,
+      SPAN_7_FETCH_GET!,
+      SPAN_8_FETCH_POST!,
     ]);
   });
 
   it('should reverse the sort order', () => {
-    const {result, rerender} = reactHooks.renderHook(useSortNetwork, {
+    const {result, rerender} = renderHook(useSortNetwork, {
       initialProps: {items},
     });
 
@@ -165,20 +163,20 @@ describe('useSortNetwork', () => {
       getValue: expect.any(Function),
     });
     expect(result.current.items).toStrictEqual([
-      SPAN_8_FETCH_POST,
-      SPAN_7_FETCH_GET,
-      SPAN_6_PUSH,
-      SPAN_5_CSS,
-      SPAN_4_IMG,
-      SPAN_3_FETCH,
-      SPAN_2_SCRIPT,
-      SPAN_1_LINK,
-      SPAN_0_NAVIGATE,
+      SPAN_8_FETCH_POST!,
+      SPAN_7_FETCH_GET!,
+      SPAN_6_PUSH!,
+      SPAN_5_CSS!,
+      SPAN_4_IMG!,
+      SPAN_3_FETCH!,
+      SPAN_2_SCRIPT!,
+      SPAN_1_LINK!,
+      SPAN_0_NAVIGATE!,
     ]);
   });
 
   it('should sort by the description field', () => {
-    const {result, rerender} = reactHooks.renderHook(useSortNetwork, {
+    const {result, rerender} = renderHook(useSortNetwork, {
       initialProps: {items},
     });
 
@@ -207,7 +205,7 @@ describe('useSortNetwork', () => {
   });
 
   it('should sort by looking up the size field', () => {
-    const {result, rerender} = reactHooks.renderHook(useSortNetwork, {
+    const {result, rerender} = renderHook(useSortNetwork, {
       initialProps: {items},
     });
 
@@ -236,8 +234,8 @@ describe('useSortNetwork', () => {
   });
 
   it('should sort by method, using GET as a default', () => {
-    const mixedItems = [SPAN_6_PUSH, SPAN_8_FETCH_POST, SPAN_7_FETCH_GET];
-    const {result, rerender} = reactHooks.renderHook(useSortNetwork, {
+    const mixedItems = [SPAN_6_PUSH!, SPAN_8_FETCH_POST!, SPAN_7_FETCH_GET!];
+    const {result, rerender} = renderHook(useSortNetwork, {
       initialProps: {items: mixedItems},
     });
 

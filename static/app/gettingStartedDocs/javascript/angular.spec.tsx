@@ -2,9 +2,9 @@ import {renderWithOnboardingLayout} from 'sentry-test/onboarding/renderWithOnboa
 import {screen} from 'sentry-test/reactTestingLibrary';
 import {textWithMarkupMatcher} from 'sentry-test/utils';
 
-import {ProductSolution} from 'sentry/components/onboarding/productSelection';
+import {ProductSolution} from 'sentry/components/onboarding/gettingStartedDoc/types';
 
-import docs from './angular';
+import docs, {AngularConfigType} from './angular';
 
 describe('javascript-angular onboarding docs', function () {
   it('renders onboarding docs correctly', () => {
@@ -18,14 +18,17 @@ describe('javascript-angular onboarding docs', function () {
 
     // Includes import statement
     expect(
-      screen.getByText(
-        textWithMarkupMatcher(/import { enableProdMode } from "@angular\/core"/)
+      screen.getAllByText(
+        textWithMarkupMatcher(/import \* as Sentry from "@sentry\/angular";/)
       )
-    ).toBeInTheDocument();
+    ).toHaveLength(2);
   });
 
   it('displays sample rates by default', () => {
     renderWithOnboardingLayout(docs, {
+      selectedOptions: {
+        configType: AngularConfigType.APP,
+      },
       selectedProducts: [
         ProductSolution.ERROR_MONITORING,
         ProductSolution.PERFORMANCE_MONITORING,
@@ -34,18 +37,21 @@ describe('javascript-angular onboarding docs', function () {
     });
 
     expect(
-      screen.queryByText(textWithMarkupMatcher(/tracesSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/tracesSampleRate/))
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(textWithMarkupMatcher(/replaysSessionSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/replaysSessionSampleRate/))
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(textWithMarkupMatcher(/replaysOnErrorSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/replaysOnErrorSampleRate/))
     ).toBeInTheDocument();
   });
 
   it('enables performance setting the tracesSampleRate to 1', () => {
     renderWithOnboardingLayout(docs, {
+      selectedOptions: {
+        configType: AngularConfigType.APP,
+      },
       selectedProducts: [
         ProductSolution.ERROR_MONITORING,
         ProductSolution.PERFORMANCE_MONITORING,
@@ -59,6 +65,9 @@ describe('javascript-angular onboarding docs', function () {
 
   it('enables replay by setting replay samplerates', () => {
     renderWithOnboardingLayout(docs, {
+      selectedOptions: {
+        configType: AngularConfigType.APP,
+      },
       selectedProducts: [
         ProductSolution.ERROR_MONITORING,
         ProductSolution.SESSION_REPLAY,
@@ -70,6 +79,22 @@ describe('javascript-angular onboarding docs', function () {
     ).toBeInTheDocument();
     expect(
       screen.getByText(textWithMarkupMatcher(/replaysOnErrorSampleRate: 1\.0/))
+    ).toBeInTheDocument();
+  });
+
+  it('enables profiling by setting profiling sample rates', () => {
+    renderWithOnboardingLayout(docs, {
+      selectedOptions: {
+        configType: AngularConfigType.APP,
+      },
+      selectedProducts: [ProductSolution.ERROR_MONITORING, ProductSolution.PROFILING],
+    });
+
+    expect(
+      screen.getByText(textWithMarkupMatcher(/Sentry.browserProfilingIntegration\(\)/))
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(textWithMarkupMatcher(/profilesSampleRate: 1\.0/))
     ).toBeInTheDocument();
   });
 });

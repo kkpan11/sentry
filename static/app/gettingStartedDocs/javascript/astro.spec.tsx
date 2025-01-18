@@ -2,7 +2,7 @@ import {renderWithOnboardingLayout} from 'sentry-test/onboarding/renderWithOnboa
 import {screen} from 'sentry-test/reactTestingLibrary';
 import {textWithMarkupMatcher} from 'sentry-test/utils';
 
-import {ProductSolution} from 'sentry/components/onboarding/productSelection';
+import {ProductSolution} from 'sentry/components/onboarding/gettingStartedDoc/types';
 
 import docs from './astro';
 
@@ -24,6 +24,7 @@ describe('javascript-astro onboarding docs', function () {
     ).toBeInTheDocument();
   });
 
+  /* The Astro SDK adds `browserTrackingIntegration` per default - it does not have to be explicitly added. */
   it("doesn't display any sample rates by default", () => {
     renderWithOnboardingLayout(docs, {
       selectedProducts: [

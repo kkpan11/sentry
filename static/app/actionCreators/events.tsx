@@ -5,16 +5,16 @@ import {addErrorMessage} from 'sentry/actionCreators/indicator';
 import type {ApiResult, Client, ResponseMeta} from 'sentry/api';
 import {canIncludePreviousPeriod} from 'sentry/components/charts/utils';
 import {t} from 'sentry/locale';
+import type {DateString} from 'sentry/types/core';
+import type {IssueAttachment} from 'sentry/types/group';
 import type {
-  DateString,
   EventsStats,
-  IssueAttachment,
   MultiSeriesEventsStats,
   OrganizationSummary,
-} from 'sentry/types';
+} from 'sentry/types/organization';
 import type {LocationQuery} from 'sentry/utils/discover/eventView';
 import type {DiscoverDatasets} from 'sentry/utils/discover/types';
-import {getPeriod} from 'sentry/utils/getPeriod';
+import {getPeriod} from 'sentry/utils/duration/getPeriod';
 import {PERFORMANCE_URL_PARAM} from 'sentry/utils/performance/constants';
 import type {QueryBatching} from 'sentry/utils/performance/contexts/genericQueryBatcher';
 import type {
@@ -51,14 +51,17 @@ type Options = {
   project?: Readonly<number[]>;
   query?: string;
   queryBatching?: QueryBatching;
-  queryExtras?: Record<string, string>;
+  queryExtras?: Record<string, string | boolean | number>;
   referrer?: string;
   start?: DateString;
   team?: Readonly<string | string[]>;
   topEvents?: number;
+  useRpc?: boolean;
   withoutZerofill?: boolean;
   yAxis?: string | string[];
 };
+
+export type EventsStatsOptions<T extends boolean> = {includeAllArgs?: T} & Options;
 
 /**
  * Make requests to `events-stats` endpoint
@@ -107,7 +110,8 @@ export const doEventsRequest = <IncludeAllArgsType extends boolean = false>(
     excludeOther,
     includeAllArgs,
     dataset,
-  }: {includeAllArgs?: IncludeAllArgsType} & Options
+    useRpc,
+  }: EventsStatsOptions<IncludeAllArgsType>
 ): IncludeAllArgsType extends true
   ? Promise<
       [EventsStats | MultiSeriesEventsStats, string | undefined, ResponseMeta | undefined]
@@ -135,6 +139,7 @@ export const doEventsRequest = <IncludeAllArgsType extends boolean = false>(
       referrer: referrer ? referrer : 'api.organization-event-stats',
       excludeOther: excludeOther ? '1' : undefined,
       dataset,
+      useRpc: useRpc ? '1' : undefined,
     }).filter(([, value]) => typeof value !== 'undefined')
   );
 
@@ -164,6 +169,7 @@ export type EventQuery = {
   query: string;
   cursor?: string;
   dataset?: DiscoverDatasets;
+  discoverSavedQueryId?: string;
   environment?: string[];
   equation?: string[];
   noPagination?: boolean;
@@ -172,6 +178,7 @@ export type EventQuery = {
   referrer?: string;
   sort?: string | string[];
   team?: string | string[];
+  useRpc?: '1';
 };
 
 export type TagSegment = {
@@ -232,7 +239,7 @@ export function fetchTotalCount(
 type FetchEventAttachmentParameters = {
   eventId: string;
   orgSlug: string;
-  projectSlug: string;
+  projectSlug: string | undefined;
 };
 
 type FetchEventAttachmentResponse = IssueAttachment[];
@@ -246,18 +253,19 @@ export const makeFetchEventAttachmentsQueryKey = ({
 ];
 
 export const useFetchEventAttachments = (
-  {orgSlug, projectSlug, eventId}: FetchEventAttachmentParameters,
+  params: FetchEventAttachmentParameters,
   options: Partial<UseApiQueryOptions<FetchEventAttachmentResponse>> = {}
 ) => {
   const organization = useOrganization();
   return useApiQuery<FetchEventAttachmentResponse>(
-    [`/projects/${orgSlug}/${projectSlug}/events/${eventId}/attachments/`],
+    makeFetchEventAttachmentsQueryKey(params),
     {
       staleTime: Infinity,
       ...options,
       enabled:
-        (organization.features?.includes('event-attachments') ?? false) &&
-        options.enabled !== false,
+        (organization.features.includes('event-attachments') ?? false) &&
+        options.enabled !== false &&
+        params.projectSlug !== undefined,
     }
   );
 };
@@ -297,7 +305,9 @@ export const useDeleteEventAttachmentOptimistic = (
       );
     },
     onMutate: async variables => {
-      await queryClient.cancelQueries(makeFetchEventAttachmentsQueryKey(variables));
+      await queryClient.cancelQueries({
+        queryKey: makeFetchEventAttachmentsQueryKey(variables),
+      });
 
       const previous = getApiQueryData<FetchEventAttachmentResponse>(
         queryClient,

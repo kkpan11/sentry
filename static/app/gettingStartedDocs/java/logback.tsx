@@ -9,6 +9,7 @@ import type {
   DocsParams,
   OnboardingConfig,
 } from 'sentry/components/onboarding/gettingStartedDoc/types';
+import {feedbackOnboardingCrashApiJava} from 'sentry/gettingStartedDocs/java/java';
 import {t, tct} from 'sentry/locale';
 import {getPackageVersion} from 'sentry/utils/gettingStartedDocs/getPackageVersion';
 
@@ -113,7 +114,7 @@ const getConsoleAppenderSnippet = (params: Params) => `
   <!-- Configure the Sentry appender, overriding the logging threshold to the WARN level -->
   <appender name="Sentry" class="io.sentry.logback.SentryAppender">
     <options>
-      <dsn>${params.dsn}</dsn>
+      <dsn>${params.dsn.public}</dsn>
     </options>
   </appender>
 
@@ -128,7 +129,7 @@ const getConsoleAppenderSnippet = (params: Params) => `
 const getLogLevelSnippet = (params: Params) => `
 <appender name="Sentry" class="io.sentry.logback.SentryAppender">
   <options>
-    <dsn>${params.dsn}</dsn>
+    <dsn>${params.dsn.public}</dsn>
   </options>
   <!-- Optionally change minimum Event level. Default for Events is ERROR -->
   <minimumEventLevel>WARN</minimumEventLevel>
@@ -291,7 +292,7 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
               code: getVerifyJavaSnippet(),
             },
             {
-              language: 'java',
+              language: 'kotlin',
               label: 'Kotlin',
               value: 'kotlin',
               code: getVerifyKotlinSnippet(),
@@ -338,6 +339,8 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
 
 const docs: Docs<PlatformOptions> = {
   onboarding,
+  feedbackOnboardingCrashApi: feedbackOnboardingCrashApiJava,
+  crashReportOnboarding: feedbackOnboardingCrashApiJava,
   platformOptions,
 };
 

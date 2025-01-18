@@ -23,6 +23,11 @@ describe('Incident Rules Create', () => {
       url: '/organizations/org-slug/events-meta/',
       body: {count: 5},
     });
+
+    MockApiClient.addMockResponse({
+      url: '/organizations/org-slug/events/',
+      body: {},
+    });
   });
   afterEach(() => {
     MockApiClient.clearMockResponses();
@@ -36,6 +41,7 @@ describe('Incident Rules Create', () => {
     render(
       <TriggersChart
         api={api}
+        anomalies={[]}
         location={router.location}
         organization={organization}
         projects={[project]}
@@ -65,7 +71,7 @@ describe('Incident Rules Create', () => {
           interval: '1m',
           project: [2],
           query: 'event.type:error',
-          statsPeriod: '9999m',
+          statsPeriod: '9998m',
           yAxis: 'count()',
           referrer: 'api.organization-event-stats',
         },
@@ -78,7 +84,7 @@ describe('Incident Rules Create', () => {
         query: {
           project: ['2'],
           query: 'event.type:error',
-          statsPeriod: '9999m',
+          statsPeriod: '9998m',
           environment: [],
         },
       })
@@ -119,7 +125,7 @@ describe('Incident Rules Create', () => {
           interval: '1m',
           project: [2],
           query: 'event.type:error',
-          statsPeriod: '9999m',
+          statsPeriod: '9998m',
           yAxis: 'count()',
           referrer: 'api.organization-event-stats',
         },
@@ -132,9 +138,158 @@ describe('Incident Rules Create', () => {
         query: {
           project: ['2'],
           query: 'event.type:error',
-          statsPeriod: '9999m',
+          statsPeriod: '9998m',
           environment: [],
         },
+      })
+    );
+  });
+
+  it('queries the errors dataset if dataset is errors', async () => {
+    const {organization, project, router} = initializeOrg({
+      organization: {features: ['performance-discover-dataset-selector']},
+    });
+
+    render(
+      <TriggersChart
+        api={api}
+        location={router.location}
+        organization={organization}
+        projects={[project]}
+        query="event.type:error"
+        timeWindow={1}
+        aggregate="count()"
+        dataset={Dataset.ERRORS}
+        triggers={[]}
+        environment={null}
+        comparisonType={AlertRuleComparisonType.COUNT}
+        resolveThreshold={null}
+        thresholdType={AlertRuleThresholdType.BELOW}
+        newAlertOrQuery
+        onDataLoaded={() => {}}
+        isQueryValid
+        showTotalCount
+      />
+    );
+
+    expect(await screen.findByTestId('area-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('alert-total-events')).toBeInTheDocument();
+
+    expect(eventStatsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        query: {
+          interval: '1m',
+          project: [2],
+          query: 'event.type:error',
+          statsPeriod: '9998m',
+          yAxis: 'count()',
+          referrer: 'api.organization-event-stats',
+          dataset: 'errors',
+        },
+      })
+    );
+
+    expect(eventCountsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        query: {
+          project: ['2'],
+          query: 'event.type:error',
+          statsPeriod: '9998m',
+          environment: [],
+          dataset: 'errors',
+        },
+      })
+    );
+  });
+
+  it('queries custom metrics using the metricsEnhanced dataset and metrics layer', async () => {
+    const {organization, project, router} = initializeOrg({
+      organization: {features: ['custom-metrics']},
+    });
+
+    render(
+      <TriggersChart
+        api={api}
+        location={router.location}
+        organization={organization}
+        projects={[project]}
+        query=""
+        timeWindow={1}
+        aggregate="count(d:custom/my_metric@seconds)"
+        dataset={Dataset.GENERIC_METRICS}
+        triggers={[]}
+        environment={null}
+        comparisonType={AlertRuleComparisonType.COUNT}
+        resolveThreshold={null}
+        thresholdType={AlertRuleThresholdType.BELOW}
+        newAlertOrQuery
+        onDataLoaded={() => {}}
+        isQueryValid
+        showTotalCount
+      />
+    );
+
+    expect(await screen.findByTestId('area-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('alert-total-events')).toBeInTheDocument();
+
+    expect(eventStatsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        query: {
+          interval: '1m',
+          project: [2],
+          query: '',
+          statsPeriod: '9998m',
+          yAxis: 'count(d:custom/my_metric@seconds)',
+          referrer: 'api.organization-event-stats',
+          forceMetricsLayer: 'true',
+          dataset: 'metricsEnhanced',
+        },
+      })
+    );
+  });
+
+  it('does a 7 day query for confidence data on the EAP dataset', async () => {
+    const {organization, project, router} = initializeOrg({
+      organization: {features: ['alerts-eap']},
+    });
+
+    render(
+      <TriggersChart
+        api={api}
+        location={router.location}
+        organization={organization}
+        projects={[project]}
+        query=""
+        timeWindow={1}
+        aggregate="count(span.duration)"
+        dataset={Dataset.EVENTS_ANALYTICS_PLATFORM}
+        triggers={[]}
+        environment={null}
+        comparisonType={AlertRuleComparisonType.COUNT}
+        resolveThreshold={null}
+        thresholdType={AlertRuleThresholdType.BELOW}
+        newAlertOrQuery
+        onDataLoaded={() => {}}
+        isQueryValid
+        showTotalCount
+        includeConfidence
+      />
+    );
+
+    expect(await screen.findByTestId('area-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('alert-total-events')).toBeInTheDocument();
+
+    expect(eventStatsMock).toHaveBeenCalledWith(
+      '/organizations/org-slug/events-stats/',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          dataset: 'spans',
+          statsPeriod: '9998m',
+          yAxis: 'count(span.duration)',
+        }),
       })
     );
   });

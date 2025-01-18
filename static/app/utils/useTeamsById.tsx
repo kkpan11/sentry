@@ -3,7 +3,7 @@ import {useEffect, useMemo} from 'react';
 import OrganizationStore from 'sentry/stores/organizationStore';
 import TeamStore from 'sentry/stores/teamStore';
 import {useLegacyStore} from 'sentry/stores/useLegacyStore';
-import type {Team} from 'sentry/types';
+import type {Team} from 'sentry/types/organization';
 import type {ApiQueryKey} from 'sentry/utils/queryClient';
 import {useApiQuery} from 'sentry/utils/queryClient';
 
@@ -73,7 +73,8 @@ export function useTeamsById(options: UseTeamOptions = {}): UseTeamsResult {
 
   const query = useMemo<TeamQuery | null>(() => getQueryFromOptions(options), [options]);
   const missingIds = query
-    ? query[1].filter(id => !storeState.teams.find(team => team[query[0]] === id))
+    ? // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+      query[1].filter(id => !storeState.teams.find(team => team[query[0]] === id))
     : [];
 
   // Wait until the store has loaded to start fetching
@@ -85,7 +86,7 @@ export function useTeamsById(options: UseTeamOptions = {}): UseTeamsResult {
   const queryKey = buildTeamsQueryKey(organization?.slug ?? '', query);
   const {
     data: additionalTeams = [],
-    isLoading,
+    isPending,
     isError,
   } = useApiQuery<Team[]>(queryKey, {
     staleTime: 0,
@@ -101,13 +102,14 @@ export function useTeamsById(options: UseTeamOptions = {}): UseTeamsResult {
 
   const teams = useMemo<Team[]>(() => {
     return query
-      ? storeState.teams.filter(team => query[1].includes(team[query[0]]))
+      ? // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+        storeState.teams.filter(team => query[1].includes(team[query[0]]))
       : storeState.teams;
   }, [storeState.teams, query]);
 
   return {
     teams,
-    isLoading: queryEnabled ? isLoading : storeState.loading,
+    isLoading: queryEnabled ? isPending : storeState.loading,
     isError: queryEnabled ? isError : null,
   };
 }

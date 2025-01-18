@@ -14,7 +14,7 @@ import {
 import {IconAdd, IconSubtract} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Project} from 'sentry/types';
+import type {Project} from 'sentry/types/project';
 import {getCenterScaleMatrixFromConfigPosition} from 'sentry/utils/profiling/gl/utils';
 import type {Rect} from 'sentry/utils/profiling/speedscope';
 
@@ -144,16 +144,16 @@ function Wireframe({hierarchy, selectedNode, onNodeSelect, project}: WireframePr
 
         for (let i = 0; i < hierarchyData.nodes.length; i++) {
           canvas.strokeRect(
-            hierarchyData.nodes[i].rect.x,
-            hierarchyData.nodes[i].rect.y,
-            hierarchyData.nodes[i].rect.width,
-            hierarchyData.nodes[i].rect.height
+            hierarchyData.nodes[i]!.rect.x,
+            hierarchyData.nodes[i]!.rect.y,
+            hierarchyData.nodes[i]!.rect.width,
+            hierarchyData.nodes[i]!.rect.height
           );
           canvas.fillRect(
-            hierarchyData.nodes[i].rect.x,
-            hierarchyData.nodes[i].rect.y,
-            hierarchyData.nodes[i].rect.width,
-            hierarchyData.nodes[i].rect.height
+            hierarchyData.nodes[i]!.rect.x,
+            hierarchyData.nodes[i]!.rect.y,
+            hierarchyData.nodes[i]!.rect.width,
+            hierarchyData.nodes[i]!.rect.height
           );
         }
       }

@@ -4,8 +4,9 @@ import styled from '@emotion/styled';
 import StacktracePlatformIcon from 'sentry/components/events/interfaces/crashContent/stackTrace/platformIcon';
 import Panel from 'sentry/components/panels/panel';
 import {t} from 'sentry/locale';
-import type {Frame, Group, PlatformKey} from 'sentry/types';
-import type {Event} from 'sentry/types/event';
+import type {Event, Frame} from 'sentry/types/event';
+import type {Group} from 'sentry/types/group';
+import type {PlatformKey} from 'sentry/types/project';
 import type {StacktraceType} from 'sentry/types/stacktrace';
 import {defined} from 'sentry/utils';
 
@@ -24,7 +25,6 @@ type Props = {
   event: Event;
   platform: PlatformKey;
   className?: string;
-  expandFirstFrame?: boolean;
   groupingCurrentLevel?: Group['metadata']['current_level'];
   hiddenFrameCount?: number;
   hideIcon?: boolean;
@@ -49,7 +49,6 @@ export function NativeContent({
   hideIcon,
   groupingCurrentLevel,
   includeSystemFrames = true,
-  expandFirstFrame = true,
   maxDepth,
   meta,
 }: Props) {
@@ -73,9 +72,10 @@ export function NativeContent({
   function setInitialFrameMap(): {[frameIndex: number]: boolean} {
     const indexMap = {};
     (data.frames ?? []).forEach((frame, frameIdx) => {
-      const nextFrame = (data.frames ?? [])[frameIdx + 1];
+      const nextFrame = (data.frames ?? [])[frameIdx + 1]!;
       const repeatedFrame = isRepeatedFrame(frame, nextFrame);
       if (frameIsVisible(frame, nextFrame) && !repeatedFrame && !frame.inApp) {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         indexMap[frameIdx] = false;
       }
     });
@@ -86,9 +86,10 @@ export function NativeContent({
     let count = 0;
     const countMap = {};
     (data.frames ?? []).forEach((frame, frameIdx) => {
-      const nextFrame = (data.frames ?? [])[frameIdx + 1];
+      const nextFrame = (data.frames ?? [])[frameIdx + 1]!;
       const repeatedFrame = isRepeatedFrame(frame, nextFrame);
       if (frameIsVisible(frame, nextFrame) && !repeatedFrame && !frame.inApp) {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         countMap[frameIdx] = count;
         count = 0;
       } else {
@@ -179,7 +180,7 @@ export function NativeContent({
   let convertedFrames = frames
     .map((frame, frameIndex) => {
       const prevFrame = frames[frameIndex - 1];
-      const nextFrame = frames[frameIndex + 1];
+      const nextFrame = frames[frameIndex + 1]!;
       const repeatedFrame = isRepeatedFrame(frame, nextFrame);
 
       if (repeatedFrame) {
@@ -197,7 +198,6 @@ export function NativeContent({
           frame,
           prevFrame,
           nextFrame,
-          isExpanded: expandFirstFrame && lastFrameIndex === frameIndex,
           emptySourceNotation: inlined
             ? false
             : lastFrameIndex === frameIndex && frameIndex === 0,
@@ -259,7 +259,7 @@ export function NativeContent({
 
   if (convertedFrames.length > 0 && registers) {
     const lastFrame = convertedFrames.length - 1;
-    convertedFrames[lastFrame] = cloneElement(convertedFrames[lastFrame], {
+    convertedFrames[lastFrame] = cloneElement(convertedFrames[lastFrame]!, {
       registers,
     });
   }
@@ -269,23 +269,33 @@ export function NativeContent({
   }
 
   return (
-    <Wrapper className={wrapperClassName} data-test-id="native-stack-trace-content">
+    <Wrapper>
       {hideIcon ? null : (
         <StacktracePlatformIcon
           platform={stackTracePlatformIcon(platform, data.frames ?? [])}
         />
       )}
-
-      <Frames data-test-id="stack-trace">
-        {!newestFirst ? convertedFrames : [...convertedFrames].reverse()}
-      </Frames>
+      <ContentPanel
+        className={wrapperClassName}
+        data-test-id="native-stack-trace-content"
+        hideIcon={hideIcon}
+      >
+        <Frames data-test-id="stack-trace">
+          {!newestFirst ? convertedFrames : [...convertedFrames].reverse()}
+        </Frames>
+      </ContentPanel>
     </Wrapper>
   );
 }
 
-const Wrapper = styled(Panel)`
+const Wrapper = styled('div')`
   position: relative;
-  border-top-left-radius: 0;
+`;
+
+const ContentPanel = styled(Panel)<{hideIcon?: boolean}>`
+  position: relative;
+  border-top-left-radius: ${p => (p.hideIcon ? p.theme.borderRadius : 0)};
+  overflow: hidden;
 `;
 
 export const Frames = styled('ul')`

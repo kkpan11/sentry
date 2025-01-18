@@ -1,10 +1,12 @@
 import {useMemo} from 'react';
 
-import {TabList, Tabs} from 'sentry/components/tabs';
+import * as Layout from 'sentry/components/layouts/thirds';
+import {TabList} from 'sentry/components/tabs';
 import {t} from 'sentry/locale';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import {useLocation} from 'sentry/utils/useLocation';
 import useOrganization from 'sentry/utils/useOrganization';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
+import useAllMobileProj from 'sentry/views/replays/detail/useAllMobileProj';
 
 interface Props {
   selected: 'replays' | 'selectors';
@@ -13,6 +15,7 @@ interface Props {
 export default function ReplayTabs({selected}: Props) {
   const organization = useOrganization();
   const location = useLocation();
+  const {allMobileProj} = useAllMobileProj({});
 
   const tabs = useMemo(
     () => [
@@ -33,7 +36,7 @@ export default function ReplayTabs({selected}: Props) {
   );
 
   return (
-    <Tabs value={selected}>
+    <Layout.HeaderTabs value={selected}>
       <TabList hideBorder>
         {tabs.map(tab => (
           <TabList.Item
@@ -43,11 +46,12 @@ export default function ReplayTabs({selected}: Props) {
               pathname: tab.pathname,
               query: tab.query,
             }}
+            disabled={tab.key === 'selectors' && allMobileProj}
           >
             {tab.label}
           </TabList.Item>
         ))}
       </TabList>
-    </Tabs>
+    </Layout.HeaderTabs>
   );
 }

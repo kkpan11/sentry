@@ -9,10 +9,10 @@ from sentry.api.api_publish_status import ApiPublishStatus
 from sentry.api.base import Endpoint, control_silo_endpoint
 from sentry.api.paginator import OffsetPaginator
 from sentry.api.serializers import serialize
+from sentry.hybridcloud.models.outbox import outbox_context
 from sentry.models.apiapplication import ApiApplicationStatus
 from sentry.models.apiauthorization import ApiAuthorization
 from sentry.models.apitoken import ApiToken
-from sentry.models.outbox import outbox_context
 
 
 @control_silo_endpoint
@@ -50,7 +50,9 @@ class ApiAuthorizationsEndpoint(Endpoint):
 
         with outbox_context(transaction.atomic(using=router.db_for_write(ApiToken)), flush=False):
             for token in ApiToken.objects.filter(
-                user_id=request.user.id, application=auth.application_id
+                user_id=request.user.id,
+                application=auth.application_id,
+                scoping_organization_id=auth.organization_id,
             ):
                 token.delete()
 

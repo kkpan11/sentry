@@ -1,4 +1,3 @@
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 
 import * as Layout from 'sentry/components/layouts/thirds';
@@ -14,6 +13,7 @@ import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
 import useDeadRageSelectors from 'sentry/utils/replays/hooks/useDeadRageSelectors';
 import {useLocation} from 'sentry/utils/useLocation';
+import {useNavigate} from 'sentry/utils/useNavigate';
 import useOrganization from 'sentry/utils/useOrganization';
 import SelectorTable from 'sentry/views/replays/deadRageClick/selectorTable';
 import ReplayTabs from 'sentry/views/replays/tabs';
@@ -21,6 +21,7 @@ import ReplayTabs from 'sentry/views/replays/tabs';
 export default function DeadRageClickList() {
   const organization = useOrganization();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const {isLoading, isError, data, pageLinks} = useDeadRageSelectors({
     per_page: 50,
@@ -72,7 +73,7 @@ export default function DeadRageClickList() {
             <PaginationNoMargin
               pageLinks={pageLinks}
               onCursor={(cursor, path, searchQuery) => {
-                browserHistory.push({
+                navigate({
                   pathname: path,
                   query: {...searchQuery, cursor},
                 });

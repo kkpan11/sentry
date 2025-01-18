@@ -5,7 +5,8 @@ import {openModal} from 'sentry/actionCreators/modal';
 import {Button} from 'sentry/components/button';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {IntegrationType, Organization} from 'sentry/types';
+import type {IntegrationType} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
 
 import RequestIntegrationModal from './RequestIntegrationModal';
 
@@ -45,7 +46,7 @@ export default class RequestIntegrationButton extends Component<Props, State> {
   render() {
     const {isOpen, isSent} = this.state;
 
-    let buttonText;
+    let buttonText: any;
     if (isOpen) {
       buttonText = t('Requesting Installation');
     } else if (isSent) {

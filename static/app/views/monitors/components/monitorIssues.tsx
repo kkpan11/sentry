@@ -42,7 +42,7 @@ function MonitorIssuesEmptyMessage() {
   );
 }
 
-function MonitorIssues({orgSlug, monitor, monitorEnvs}: Props) {
+export function MonitorIssues({orgSlug, monitor, monitorEnvs}: Props) {
   const {selection} = usePageFilters();
   const {start, end, period} = selection.datetime;
   const timeProps =
@@ -93,14 +93,12 @@ function MonitorIssues({orgSlug, monitor, monitorEnvs}: Props) {
       </ControlsWrapper>
       <GroupList
         orgSlug={orgSlug}
-        endpointPath={`/organizations/${orgSlug}/issues/`}
         queryParams={{
           query: issueQuery,
           project: monitor.project.id,
           limit: 20,
           ...timeProps,
         }}
-        query=""
         renderEmptyMessage={MonitorIssuesEmptyMessage}
         canSelectGroups={false}
         withPagination={false}
@@ -119,5 +117,3 @@ const ControlsWrapper = styled('div')`
   margin-bottom: ${space(1)};
   flex-wrap: wrap;
 `;
-
-export default MonitorIssues;

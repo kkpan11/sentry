@@ -48,7 +48,7 @@ class SentryVisitor(ast.NodeVisitor):
             elif node.module == "sentry.models":
                 self.errors.append((node.lineno, node.col_offset, S005_msg))
             elif (
-                "tests/" in self.filename
+                ("tests/" in self.filename or "testutils/" in self.filename)
                 and node.module == "django.utils.encoding"
                 and any(x.name in {"force_bytes", "force_str"} for x in node.names)
             ):
@@ -152,7 +152,7 @@ class SentryCheck:
         self.tree = tree
         self.filename = filename
 
-    def run(self) -> Generator[tuple[int, int, str, type[Any]], None, None]:
+    def run(self) -> Generator[tuple[int, int, str, type[Any]]]:
         visitor = SentryVisitor(self.filename)
         visitor.visit(self.tree)
 

@@ -1,5 +1,6 @@
 import type {RefObject} from 'react';
 import {useCallback, useMemo, useRef} from 'react';
+import * as Sentry from '@sentry/react';
 
 import {uniq} from 'sentry/utils/array/uniq';
 import {decodeList, decodeScalar} from 'sentry/utils/queryString';
@@ -31,7 +32,7 @@ const TYPE_TO_LABEL: Record<string, string> = {
   start: 'Replay Start',
   feedback: 'User Feedback',
   replay: 'Replay',
-  issue: 'Issue',
+  issue: 'Error',
   console: 'Console',
   nav: 'Navigation',
   pageLoad: 'Page Load',
@@ -43,16 +44,21 @@ const TYPE_TO_LABEL: Record<string, string> = {
   action: 'User Action',
   rageOrMulti: 'Rage & Multi Click',
   rageOrDead: 'Rage & Dead Click',
-  lcp: 'LCP',
+  hydrateError: 'Hydration Error',
+  webVital: 'Web Vital',
   click: 'User Click',
   keydown: 'KeyDown',
   input: 'Input',
+  tap: 'User Tap',
+  swipe: 'User Swipe',
+  device: 'Device',
+  app: 'App',
+  custom: 'Custom',
 };
 
 const OPORCATEGORY_TO_TYPE: Record<string, keyof typeof TYPE_TO_LABEL> = {
   'replay.init': 'start',
   'replay.mutations': 'replay',
-  'sentry.feedback': 'feedback',
   issue: 'issue',
   console: 'console',
   navigation: 'nav',
@@ -66,14 +72,27 @@ const OPORCATEGORY_TO_TYPE: Record<string, keyof typeof TYPE_TO_LABEL> = {
   'ui.focus': 'action',
   'ui.multiClick': 'rageOrMulti',
   'ui.slowClickDetected': 'rageOrDead',
-  'largest-contentful-paint': 'lcp',
+  'replay.hydrate-error': 'hydrateError',
+  'web-vital': 'webVital',
   'ui.click': 'click',
+  'ui.tap': 'tap',
+  'ui.swipe': 'swipe',
   'ui.keyDown': 'keydown',
   'ui.input': 'input',
+  feedback: 'feedback',
+  'device.battery': 'device',
+  'device.connectivity': 'device',
+  'device.orientation': 'device',
+  'app.foreground': 'app',
+  'app.background': 'app',
 };
 
 function typeToLabel(val: string): string {
-  return TYPE_TO_LABEL[val] ?? 'Unknown';
+  if (TYPE_TO_LABEL[val]) {
+    return TYPE_TO_LABEL[val];
+  }
+  Sentry.captureException('Unknown breadcrumb filter type');
+  return 'Unknown';
 }
 
 const FILTERS = {
@@ -86,7 +105,7 @@ const FILTERS = {
 function useBreadcrumbFilters({frames}: Options): Return {
   const {setFilter, query} = useFiltersInLocationQuery<FilterFields>();
 
-  // Keep a reference of object paths that are expanded (via <ObjectInspector>)
+  // Keep a reference of object paths that are expanded (via <StructuredEventData>)
   // by log row, so they they can be restored as the Console pane is scrolling.
   // Due to virtualization, components can be unmounted as the user scrolls, so
   // state needs to be remembered.
@@ -98,13 +117,25 @@ function useBreadcrumbFilters({frames}: Options): Return {
   const type = useMemo(() => decodeList(query.f_b_type), [query.f_b_type]);
   const searchTerm = decodeScalar(query.f_b_search, '').toLowerCase();
 
+  // add custom breadcrumbs to filter
+  frames.forEach(frame => {
+    if (!(getFrameOpOrCategory(frame) in OPORCATEGORY_TO_TYPE)) {
+      OPORCATEGORY_TO_TYPE[getFrameOpOrCategory(frame)] = 'custom';
+    }
+  });
+
   const items = useMemo(() => {
     // flips OPORCATERGORY_TO_TYPE and prevents overwriting nav entry, nav entry becomes nav: ['navigation','navigation.push']
     const TYPE_TO_OPORCATEGORY = Object.entries(OPORCATEGORY_TO_TYPE).reduce(
       (dict, [key, value]) =>
-        dict[value] ? {...dict, [value]: [dict[value], key]} : {...dict, [value]: key},
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+        dict[value]
+          ? // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+            {...dict, [value]: [dict[value], key].flat()}
+          : {...dict, [value]: key},
       {}
     );
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     const OpOrCategory = type.flatMap(theType => TYPE_TO_OPORCATEGORY[theType]);
     return filterItems({
       items: frames,
@@ -125,8 +156,8 @@ function useBreadcrumbFilters({frames}: Options): Return {
       )
         .sort()
         .map(value => ({
-          value,
-          label: typeToLabel(value),
+          value: value!,
+          label: typeToLabel(value!),
         })),
     [frames, type]
   );

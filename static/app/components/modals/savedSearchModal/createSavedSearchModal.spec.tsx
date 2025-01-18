@@ -1,7 +1,7 @@
-import selectEvent from 'react-select-event';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 
 import {render, screen, userEvent, waitFor} from 'sentry-test/reactTestingLibrary';
+import selectEvent from 'sentry-test/selectEvent';
 
 import {
   makeClosableHeader,
@@ -10,11 +10,11 @@ import {
   ModalFooter,
 } from 'sentry/components/globalModal/components';
 import {CreateSavedSearchModal} from 'sentry/components/modals/savedSearchModal/createSavedSearchModal';
-import {SavedSearchVisibility} from 'sentry/types';
+import {SavedSearchVisibility} from 'sentry/types/group';
 import {IssueSortOptions} from 'sentry/views/issueList/utils';
 
 describe('CreateSavedSearchModal', function () {
-  let createMock;
+  let createMock: any;
   const organization = OrganizationFixture({
     access: ['org:write'],
   });
@@ -45,6 +45,10 @@ describe('CreateSavedSearchModal', function () {
     MockApiClient.addMockResponse({
       url: '/organizations/org-slug/recent-searches/',
       method: 'POST',
+      body: [],
+    });
+    MockApiClient.addMockResponse({
+      url: `/organizations/org-slug/tags/`,
       body: [],
     });
   });
@@ -79,11 +83,10 @@ describe('CreateSavedSearchModal', function () {
     await userEvent.click(screen.getByRole('textbox', {name: /name/i}));
     await userEvent.paste('new search name');
 
-    await userEvent.clear(screen.getByRole('textbox', {name: /filter issues/i}));
-    await userEvent.click(screen.getByRole('textbox', {name: /filter issues/i}));
-    await userEvent.paste('is:resolved');
+    await userEvent.click(screen.getAllByRole('combobox').at(-1)!);
+    await userEvent.paste('event.type:error');
 
-    await selectEvent.select(screen.getByText('Last Seen'), 'Priority');
+    await selectEvent.select(screen.getByText('Last Seen'), 'Trends');
     await userEvent.click(screen.getByRole('button', {name: 'Save'}));
 
     await waitFor(() => {
@@ -92,8 +95,8 @@ describe('CreateSavedSearchModal', function () {
         expect.objectContaining({
           data: {
             name: 'new search name',
-            query: 'is:resolved',
-            sort: IssueSortOptions.PRIORITY,
+            query: 'is:unresolved assigned:lyn@sentry.io event.type:error',
+            sort: IssueSortOptions.TRENDS,
             type: 0,
             visibility: SavedSearchVisibility.OWNER,
           },

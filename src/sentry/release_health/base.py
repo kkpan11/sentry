@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, Union
 
-# from sentry.models.organization import Organization
+from typing_extensions import TypeIs
+
 from sentry.utils.services import Service
 
 if TYPE_CHECKING:
@@ -111,6 +112,10 @@ StatsPeriod = Literal[
 ]
 
 OverviewStat = Literal["users", "sessions"]
+
+
+def is_overview_stat(s: str) -> TypeIs[OverviewStat]:
+    return s in ("users", "sessions")
 
 
 class CurrentAndPreviousCrashFreeRate(TypedDict):
@@ -238,13 +243,9 @@ class ReleaseHealthBackend(Service):
         "get_project_releases_count",
         "get_project_release_stats",
         "get_project_sessions_count",
-        "is_metrics_based",
         "get_num_sessions_per_project",
         "get_project_releases_by_stability",
     )
-
-    def is_metrics_based(self) -> bool:
-        return False
 
     def get_current_and_previous_crash_free_rates(
         self,
@@ -330,7 +331,7 @@ class ReleaseHealthBackend(Service):
         project_id: ProjectId,
         release: ReleaseName,
         org_id: OrganizationId,
-        environments: Sequence[EnvironmentName] | None = None,
+        environments: Iterable[str] | None = None,
     ) -> ReleaseSessionsTimeBounds:
         """
         Get the sessions time bounds in terms of when the first session started and
@@ -406,7 +407,7 @@ class ReleaseHealthBackend(Service):
 
     def get_changed_project_release_model_adoptions(
         self,
-        project_ids: Sequence[ProjectId],
+        project_ids: Iterable[int],
         now: datetime | None = None,
     ) -> Sequence[ProjectRelease]:
         """
@@ -467,8 +468,8 @@ class ReleaseHealthBackend(Service):
     def get_num_sessions_per_project(
         self,
         project_ids: Sequence[ProjectId],
-        start: datetime,
-        end: datetime,
+        start: datetime | None,
+        end: datetime | None,
         environment_ids: Sequence[int] | None = None,
         rollup: int | None = None,  # rollup in seconds
     ) -> Sequence[ProjectWithCount]:

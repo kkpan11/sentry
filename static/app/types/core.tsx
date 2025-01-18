@@ -67,19 +67,21 @@ export type Choice = [
 export type Choices = Choice[];
 
 /**
- * @deprecated in favour of `DataCategoryExact` and `DATA_CATEGORY_INFO`.
- * This legacy type used plurals which will cause compatibility issues when categories
- * become more complex, e.g. processed transactions, session replays. Instead, access these values
- * with `DATA_CATEGORY_INFO[category].plural`, where category is the `DataCategoryExact` enum value.
+ * These are very similar to the plural types of DATA_CATEGORY_INFO.
+ * DATA_CATEGORY_INFO and DataCategoryExact have additional categories
+ * that are used in stats but not other places like billing.
  */
 export enum DataCategory {
-  DEFAULT = 'default',
   ERRORS = 'errors',
   TRANSACTIONS = 'transactions',
   ATTACHMENTS = 'attachments',
   PROFILES = 'profiles',
   REPLAYS = 'replays',
   MONITOR_SEATS = 'monitorSeats',
+  PROFILE_DURATION = 'profileDuration',
+  SPANS = 'spans',
+  SPANS_INDEXED = 'spansIndexed',
+  PROFILE_CHUNKS = 'profileChunks',
 }
 
 /**
@@ -93,17 +95,23 @@ export enum DataCategoryExact {
   ATTACHMENT = 'attachment',
   PROFILE = 'profile',
   REPLAY = 'replay',
+  // TODO: Update processed and indexed transactions to camel case"
   TRANSACTION_PROCESSED = 'transaction_processed',
   TRANSACTION_INDEXED = 'transaction_indexed',
   MONITOR = 'monitor',
   MONITOR_SEAT = 'monitorSeat',
+  PROFILE_DURATION = 'profileDuration',
+  SPAN = 'span',
+  SPAN_INDEXED = 'spanIndexed',
 }
 
 export interface DataCategoryInfo {
   apiName: string;
   displayName: string;
+  isBilledCategory: boolean;
   name: DataCategoryExact;
   plural: string;
+  productName: string;
   titleName: string;
   uid: number;
 }
@@ -114,9 +122,11 @@ export enum Outcome {
   ACCEPTED = 'accepted',
   FILTERED = 'filtered',
   INVALID = 'invalid',
-  DROPPED = 'dropped', // this is not a real outcome coming from the server
+  ABUSE = 'abuse',
   RATE_LIMITED = 'rate_limited',
   CLIENT_DISCARD = 'client_discard',
+  CARDINALITY_LIMITED = 'cardinality_limited',
+  DROPPED = 'dropped', // this is not a real outcome coming from the server
 }
 
 export type IntervalPeriod = ReturnType<typeof getInterval>;

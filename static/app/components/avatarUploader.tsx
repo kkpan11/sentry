@@ -2,10 +2,11 @@ import {Component, createRef, Fragment} from 'react';
 import styled from '@emotion/styled';
 
 import {addErrorMessage} from 'sentry/actionCreators/indicator';
+import {Button} from 'sentry/components/button';
 import Well from 'sentry/components/well';
 import {AVATAR_URL_MAP} from 'sentry/constants';
 import {t, tct} from 'sentry/locale';
-import type {AvatarUser} from 'sentry/types';
+import type {AvatarUser} from 'sentry/types/user';
 
 const ALLOWED_MIMETYPES = 'image/gif,image/jpeg,image/png';
 
@@ -218,14 +219,14 @@ class AvatarUploader extends Component<Props, State> {
 
     // Normalize diff across dimensions so that negative diffs are always making
     // the cropper smaller and positive ones are making the cropper larger
-    const helpers = {
+    const helpers: Record<string, (yDiff: number, xDiff: number) => number> = {
       getDiffNE,
       getDiffNW,
       getDiffSE,
       getDiffSW,
     } as const;
 
-    const diff = helpers['getDiff' + resizeDirection!.toUpperCase()](yDiff, xDiff);
+    const diff = helpers['getDiff' + resizeDirection!.toUpperCase()]!(yDiff, xDiff);
 
     let height = container.clientHeight - oldDimensions.top;
     let width = container.clientWidth - oldDimensions.left;
@@ -419,7 +420,11 @@ class AvatarUploader extends Component<Props, State> {
         {src && <HiddenCanvas ref={this.canvas} />}
         {this.renderImageCrop()}
         <div className="form-group">
-          {src && <a onClick={this.uploadClick}>{t('Change Photo')}</a>}
+          {src && (
+            <Button priority="link" onClick={this.uploadClick}>
+              {t('Change Photo')}
+            </Button>
+          )}
           <UploadInput
             ref={this.file}
             type="file"

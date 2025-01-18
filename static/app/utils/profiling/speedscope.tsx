@@ -305,7 +305,6 @@ export function findRangeBinarySearch(
   target: number,
   precision = 1
 ): [number, number] {
-  // eslint-disable-next-line
   while (true) {
     if (high - low <= precision) {
       return [low, high];
@@ -382,18 +381,6 @@ export function trimTextCenter(text: string, low: number): TrimTextCenter {
     end,
     length: end - start,
   };
-}
-
-// @TODO drop when we move to sampled profile
-export interface SpeedscopeSchema {
-  profiles: ReadonlyArray<
-    Readonly<Profiling.EventedProfile | Profiling.SampledProfile | JSSelfProfiling.Trace>
-  >;
-  shared: {
-    frames: ReadonlyArray<Omit<Profiling.FrameInfo, 'key'>>;
-    profile_ids?: ReadonlyArray<string>;
-  };
-  activeProfileIndex?: number;
 }
 
 // This differs, but the underlying logic is similar, we just support a mat3 as the transform

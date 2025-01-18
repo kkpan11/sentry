@@ -1,4 +1,3 @@
-import {browserHistory} from 'react-router';
 import type {Location} from 'history';
 import {HealthFixture} from 'sentry-fixture/health';
 import {LocationFixture} from 'sentry-fixture/locationFixture';
@@ -7,7 +6,7 @@ import {ReleaseFixture} from 'sentry-fixture/release';
 import {ReleaseMetaFixture} from 'sentry-fixture/releaseMeta';
 import {ReleaseProjectFixture} from 'sentry-fixture/releaseProject';
 import {RouteComponentPropsFixture} from 'sentry-fixture/routeComponentPropsFixture';
-import {RouterContextFixture} from 'sentry-fixture/routerContextFixture';
+import {RouterFixture} from 'sentry-fixture/routerFixture';
 
 import {
   render,
@@ -17,11 +16,12 @@ import {
   waitFor,
 } from 'sentry-test/reactTestingLibrary';
 
-import type {ReleaseProject} from 'sentry/types';
-import {ReleaseStatus} from 'sentry/types';
+import type {ReleaseProject} from 'sentry/types/release';
+import {ReleaseStatus} from 'sentry/types/release';
 import ReleaseActions from 'sentry/views/releases/detail/header/releaseActions';
 
 describe('ReleaseActions', function () {
+  const router = RouterFixture();
   const organization = OrganizationFixture();
 
   const project1 = ReleaseProjectFixture({
@@ -42,7 +42,7 @@ describe('ReleaseActions', function () {
 
   const location: Location = {
     ...LocationFixture(),
-    pathname: `/organizations/sentry/releases/${release.version}/`,
+    pathname: `/organizations/${organization.slug}/releases/${release.version}/`,
     query: {
       project: '1',
       statsPeriod: '24h',
@@ -66,14 +66,15 @@ describe('ReleaseActions', function () {
     render(
       <ReleaseActions
         organization={organization}
-        projectSlug={release.projects[0].slug}
+        projectSlug={release.projects[0]!.slug}
         release={release}
         refetchData={jest.fn()}
         releaseMeta={{...ReleaseMetaFixture(), projects: release.projects}}
         location={location}
-      />
+      />,
+      {router}
     );
-    renderGlobalModal();
+    renderGlobalModal({router});
 
     await userEvent.click(screen.getByLabelText('Actions'));
 
@@ -86,7 +87,7 @@ describe('ReleaseActions', function () {
 
     expect(await screen.findByText('Archive Release 1.2.0')).toBeInTheDocument();
     const affectedProjects = screen.getAllByTestId('badge-display-name');
-    expect(affectedProjects.length).toBe(2);
+    expect(affectedProjects).toHaveLength(2);
 
     // confirm modal
     await userEvent.click(screen.getByTestId('confirm-button'));
@@ -102,7 +103,7 @@ describe('ReleaseActions', function () {
       })
     );
     await waitFor(() =>
-      expect(browserHistory.push).toHaveBeenCalledWith(
+      expect(router.push).toHaveBeenCalledWith(
         `/organizations/${organization.slug}/releases/`
       )
     );
@@ -115,14 +116,15 @@ describe('ReleaseActions', function () {
       <ReleaseActions
         {...RouteComponentPropsFixture()}
         organization={organization}
-        projectSlug={release.projects[0].slug}
+        projectSlug={release.projects[0]!.slug}
         release={{...release, status: ReleaseStatus.ARCHIVED}}
         refetchData={refetchDataMock}
         releaseMeta={{...ReleaseMetaFixture(), projects: release.projects}}
         location={location}
-      />
+      />,
+      {router}
     );
-    renderGlobalModal();
+    renderGlobalModal({router});
 
     await userEvent.click(screen.getByLabelText('Actions'));
 
@@ -135,7 +137,7 @@ describe('ReleaseActions', function () {
 
     expect(await screen.findByText('Restore Release 1.2.0')).toBeInTheDocument();
     const affectedProjects = screen.getAllByTestId('badge-display-name');
-    expect(affectedProjects.length).toBe(2);
+    expect(affectedProjects).toHaveLength(2);
 
     // confirm modal
     await userEvent.click(screen.getByTestId('confirm-button'));
@@ -155,53 +157,52 @@ describe('ReleaseActions', function () {
   });
 
   it('navigates to a next/prev release', function () {
-    const routerContext = RouterContextFixture();
     const {rerender} = render(
       <ReleaseActions
         organization={organization}
-        projectSlug={release.projects[0].slug}
+        projectSlug={release.projects[0]!.slug}
         release={release}
         refetchData={jest.fn()}
         releaseMeta={{...ReleaseMetaFixture(), projects: release.projects}}
         location={location}
       />,
-      {context: routerContext}
+      {router}
     );
 
     expect(screen.getByLabelText('Oldest')).toHaveAttribute(
       'href',
-      '/organizations/sentry/releases/0/?project=1&statsPeriod=24h&yAxis=events'
+      `/organizations/${organization.slug}/releases/0/?project=1&statsPeriod=24h&yAxis=events`
     );
     expect(screen.getByLabelText('Older')).toHaveAttribute(
       'href',
-      '/organizations/sentry/releases/123/?project=1&statsPeriod=24h&yAxis=events'
+      `/organizations/${organization.slug}/releases/123/?project=1&statsPeriod=24h&yAxis=events`
     );
     expect(screen.getByLabelText('Newer')).toHaveAttribute(
       'href',
-      '/organizations/sentry/releases/456/?project=1&statsPeriod=24h&yAxis=events'
+      `/organizations/${organization.slug}/releases/456/?project=1&statsPeriod=24h&yAxis=events`
     );
     expect(screen.getByLabelText('Newest')).toHaveAttribute(
       'href',
-      '/organizations/sentry/releases/999/?project=1&statsPeriod=24h&yAxis=events'
+      `/organizations/${organization.slug}/releases/999/?project=1&statsPeriod=24h&yAxis=events`
     );
 
     rerender(
       <ReleaseActions
         organization={organization}
-        projectSlug={release.projects[0].slug}
+        projectSlug={release.projects[0]!.slug}
         release={release}
         refetchData={jest.fn()}
         releaseMeta={{...ReleaseMetaFixture(), projects: release.projects}}
         location={{
           ...location,
-          pathname: `/organizations/sentry/releases/${release.version}/files-changed/`,
+          pathname: `/organizations/${organization.slug}/releases/${release.version}/files-changed/`,
         }}
       />
     );
 
     expect(screen.getByLabelText('Newer')).toHaveAttribute(
       'href',
-      '/organizations/sentry/releases/456/files-changed/?project=1&statsPeriod=24h&yAxis=events'
+      `/organizations/${organization.slug}/releases/456/files-changed/?project=1&statsPeriod=24h&yAxis=events`
     );
   });
 });

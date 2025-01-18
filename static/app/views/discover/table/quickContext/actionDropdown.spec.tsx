@@ -1,7 +1,7 @@
-import {browserHistory} from 'react-router';
 import type {Location} from 'history';
 import {LocationFixture} from 'sentry-fixture/locationFixture';
 import {OrganizationFixture} from 'sentry-fixture/organization';
+import {RouterFixture} from 'sentry-fixture/routerFixture';
 
 import {render, screen, userEvent} from 'sentry-test/reactTestingLibrary';
 
@@ -33,6 +33,8 @@ const mockedLocation = LocationFixture({
   },
 });
 
+const mockedRouter = RouterFixture();
+
 const renderActionDropdown = (
   location: Location,
   eventView: EventView,
@@ -51,7 +53,7 @@ const renderActionDropdown = (
       value={value}
       contextValueType={contextValueType}
     />,
-    {organization}
+    {organization, router: mockedRouter}
   );
 };
 
@@ -122,7 +124,7 @@ describe('Quick Context Actions', function () {
 
     await userEvent.click(addAsColumn);
 
-    expect(browserHistory.push).toHaveBeenCalledWith(
+    expect(mockedRouter.push).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/mock-pathname/',
         query: expect.objectContaining({
@@ -150,7 +152,7 @@ describe('Quick Context Actions', function () {
 
     await userEvent.click(addToFilter);
 
-    expect(browserHistory.push).toHaveBeenCalledWith(
+    expect(mockedRouter.push).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/mock-pathname/',
         query: expect.objectContaining({
@@ -180,7 +182,7 @@ describe('Quick Context Actions', function () {
 
     await userEvent.click(addToFilter);
 
-    expect(browserHistory.push).toHaveBeenCalledWith(
+    expect(mockedRouter.push).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/mock-pathname/',
         query: expect.objectContaining({
@@ -210,7 +212,7 @@ describe('Quick Context Actions', function () {
 
     await userEvent.click(showGreaterThanBtn);
 
-    expect(browserHistory.push).toHaveBeenCalledWith(
+    expect(mockedRouter.push).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/mock-pathname/',
         query: expect.objectContaining({
@@ -240,7 +242,7 @@ describe('Quick Context Actions', function () {
 
     await userEvent.click(showLessThanBtn);
 
-    expect(browserHistory.push).toHaveBeenCalledWith(
+    expect(mockedRouter.push).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: '/mock-pathname/',
         query: expect.objectContaining({

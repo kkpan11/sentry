@@ -4,7 +4,8 @@ import {addErrorMessage} from 'sentry/actionCreators/indicator';
 import type {Client} from 'sentry/api';
 import {t} from 'sentry/locale';
 import MemberListStore from 'sentry/stores/memberListStore';
-import type {Member, User} from 'sentry/types';
+import type {Member} from 'sentry/types/organization';
+import type {User} from 'sentry/types/user';
 
 function getMemberUser(member: Member) {
   return {
@@ -66,7 +67,7 @@ export function indexMembersByProject(members: Member[]): IndexedMembersByProjec
         acc[project] = [];
       }
       if (member.user) {
-        acc[project].push(member.user);
+        acc[project]!.push(member.user);
       }
     }
     return acc;

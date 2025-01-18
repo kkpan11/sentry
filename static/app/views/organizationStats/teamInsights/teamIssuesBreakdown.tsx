@@ -7,13 +7,14 @@ import type {DateTimeObject} from 'sentry/components/charts/utils';
 import CollapsePanel, {COLLAPSE_COUNT} from 'sentry/components/collapsePanel';
 import LoadingError from 'sentry/components/loadingError';
 import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
-import PanelTable from 'sentry/components/panels/panelTable';
+import {PanelTable} from 'sentry/components/panels/panelTable';
 import Placeholder from 'sentry/components/placeholder';
 import {IconArrow} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import ProjectsStore from 'sentry/stores/projectsStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {useApiQuery} from 'sentry/utils/queryClient';
 
 import {ProjectBadge, ProjectBadgeContainer} from './styles';
@@ -73,7 +74,7 @@ function TeamIssuesBreakdown({
 }: TeamIssuesBreakdownProps) {
   const {
     data: issuesBreakdown = {},
-    isLoading,
+    isPending,
     isError,
     refetch,
   } = useApiQuery<IssuesBreakdown>(
@@ -115,7 +116,8 @@ function TeamIssuesBreakdown({
       }
 
       for (const key of keys) {
-        projectTotals[projectId][key] += counts[key];
+        projectTotals[projectId][key as keyof StatusCounts] +=
+          counts[key as keyof StatusCounts]!;
       }
 
       if (!allReviewedByDay[projectId]) {
@@ -134,16 +136,23 @@ function TeamIssuesBreakdown({
     .map(([projectId, {total}]) => ({projectId, total}))
     .sort((a, b) => b.total - a.total);
 
-  const allSeries = Object.keys(allReviewedByDay).map(
-    (projectId, idx): BarChartSeries => ({
-      seriesName: ProjectsStore.getById(projectId)?.slug ?? projectId,
-      data: sortSeriesByDay(convertDayValueObjectToSeries(allReviewedByDay[projectId])),
-      animationDuration: 500,
-      animationDelay: idx * 500,
-      silent: true,
-      barCategoryGap: '5%',
-    })
-  );
+  // There are projects with more than 0 results
+  const hasResults = sortedProjectIds.some(({total}) => total !== 0);
+  const allSeries = Object.keys(allReviewedByDay)
+    // Hide projects with no results when there are other projects with results
+    .filter(projectId => (hasResults ? projectTotals[projectId]!.total !== 0 : true))
+    .map(
+      (projectId, idx): BarChartSeries => ({
+        seriesName: ProjectsStore.getById(projectId)?.slug ?? projectId,
+        data: sortSeriesByDay(
+          convertDayValueObjectToSeries(allReviewedByDay[projectId]!)
+        ),
+        animationDuration: 500,
+        animationDelay: idx * 500,
+        silent: true,
+        barCategoryGap: '5%',
+      })
+    );
 
   if (isError) {
     return <LoadingError onRetry={refetch} />;
@@ -152,8 +161,8 @@ function TeamIssuesBreakdown({
   return (
     <Fragment>
       <IssuesChartWrapper>
-        {isLoading && <Placeholder height="200px" />}
-        {!isLoading && (
+        {isPending && <Placeholder height="200px" />}
+        {!isPending && (
           <BarChart
             style={{height: 200}}
             stacked
@@ -180,7 +189,7 @@ function TeamIssuesBreakdown({
                   {t('total')} <IconArrow direction="down" size="xs" color="gray300" />
                 </AlignRight>,
               ]}
-              isLoading={isLoading}
+              isLoading={isPending}
             >
               {sortedProjectIds.map(({projectId}, idx) => {
                 const project = projects.find(p => p.id === projectId);
@@ -196,15 +205,15 @@ function TeamIssuesBreakdown({
                     </ProjectBadgeContainer>
                     {statuses.map(action => (
                       <AlignRight key={action}>
-                        {projectTotals[projectId][action]}
+                        {projectTotals[projectId]![action]}
                       </AlignRight>
                     ))}
-                    <AlignRight>{projectTotals[projectId].total}</AlignRight>
+                    <AlignRight>{projectTotals[projectId]!.total}</AlignRight>
                   </Fragment>
                 );
               })}
             </StyledPanelTable>
-            {!isLoading && showMoreButton}
+            {!isPending && showMoreButton}
           </Fragment>
         )}
       </CollapsePanel>

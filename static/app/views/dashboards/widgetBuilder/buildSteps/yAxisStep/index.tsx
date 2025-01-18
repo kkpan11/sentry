@@ -1,5 +1,5 @@
 import {t} from 'sentry/locale';
-import type {Organization, TagCollection} from 'sentry/types';
+import type {TagCollection} from 'sentry/types/group';
 import type {QueryFieldValue} from 'sentry/utils/discover/fields';
 import type {WidgetType} from 'sentry/views/dashboards/types';
 import {DisplayType} from 'sentry/views/dashboards/types';
@@ -13,11 +13,11 @@ interface Props {
   aggregates: QueryFieldValue[];
   dataSet: DataSet;
   displayType: DisplayType;
-  onYAxisChange: (newFields: QueryFieldValue[]) => void;
-  organization: Organization;
+  onYAxisChange: (newFields: QueryFieldValue[], newSelectedAggregate?: number) => void;
   tags: TagCollection;
   widgetType: WidgetType;
   queryErrors?: Record<string, any>[];
+  selectedAggregate?: number;
 }
 
 export function YAxisStep({
@@ -27,6 +27,7 @@ export function YAxisStep({
   onYAxisChange,
   tags,
   widgetType,
+  selectedAggregate,
 }: Props) {
   return (
     <BuildStep
@@ -50,6 +51,7 @@ export function YAxisStep({
         onChange={onYAxisChange}
         tags={tags}
         errors={queryErrors}
+        selectedAggregate={selectedAggregate}
       />
     </BuildStep>
   );

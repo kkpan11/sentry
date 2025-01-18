@@ -1,6 +1,7 @@
 """
 Metrics Service Layer Tests for Performance
 """
+
 import re
 from datetime import datetime, timedelta
 from datetime import timezone as datetime_timezone
@@ -22,11 +23,11 @@ from sentry.sentry_metrics.aggregation_option_registry import AggregationOption
 from sentry.sentry_metrics.use_case_id_registry import UseCaseID
 from sentry.snuba.metrics import (
     MAX_POINTS,
+    DeprecatingMetricsQuery,
     MetricConditionField,
     MetricField,
     MetricGroupByField,
     MetricOrderByField,
-    MetricsQuery,
 )
 from sentry.snuba.metrics.datasource import get_custom_measurements, get_series
 from sentry.snuba.metrics.naming_layer import (
@@ -529,7 +530,7 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
             )
 
         with pytest.raises(InvalidParams):
-            metrics_query = self.build_metrics_query(
+            self.build_metrics_query(
                 before_now="1h",
                 granularity="1h",
                 select=[
@@ -548,12 +549,6 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
                 limit=Limit(limit=3),
                 offset=Offset(offset=0),
                 include_series=False,
-            )
-            get_series(
-                [self.project],
-                metrics_query=metrics_query,
-                include_meta=True,
-                use_case_id=UseCaseID.TRANSACTIONS,
             )
 
     def test_query_with_sum_if_column(self):
@@ -1219,7 +1214,7 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
                     seconds_before_now=-1,
                 )
 
-        metrics_query = MetricsQuery(
+        metrics_query = DeprecatingMetricsQuery(
             org_id=self.organization.id,
             project_ids=[self.project.id],
             select=[
@@ -1767,9 +1762,11 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
                             lhs=Function(
                                 "match",
                                 parameters=[
-                                    Function("ifNull", parameters=[column, ""])
-                                    if use_if_null
-                                    else column,
+                                    (
+                                        Function("ifNull", parameters=[column, ""])
+                                        if use_if_null
+                                        else column
+                                    ),
                                     f"(?i)^{tag_wildcard_value.replace('*', '.*')}$",
                                 ],
                             ),
@@ -1851,7 +1848,7 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
                 minutes_before_now=minutes,
             )
 
-        metrics_query = MetricsQuery(
+        metrics_query = DeprecatingMetricsQuery(
             org_id=self.organization.id,
             project_ids=[self.project.id],
             select=[
@@ -1947,7 +1944,7 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
 
     def test_limit_when_not_passed_and_interval_is_provided(self):
         day_ago = before_now(days=1).replace(hour=10, minute=0, second=0, microsecond=0)
-        metrics_query = MetricsQuery(
+        metrics_query = DeprecatingMetricsQuery(
             org_id=self.organization.id,
             project_ids=[self.project.id],
             select=[
@@ -2000,9 +1997,9 @@ class PerformanceMetricsLayerTestCase(BaseMetricsLayerTestCase, TestCase):
             "include_series": True,
         }
         with pytest.raises(InvalidParams):
-            MetricsQuery(**metrics_query_dict)
+            DeprecatingMetricsQuery(**metrics_query_dict)
 
-        mq = MetricsQuery(**metrics_query_dict, interval=3600)
+        mq = DeprecatingMetricsQuery(**metrics_query_dict, interval=3600)
         assert mq.limit is not None
         assert mq.limit.limit == 50
 
@@ -2390,7 +2387,7 @@ class GetCustomMeasurementsTestCase(MetricsEnhancedPerformanceTestCase):
         ]
 
     @mock.patch("sentry.snuba.metrics.datasource.parse_mri")
-    def test_broken_custom_metric(self, mock):
+    def test_broken_custom_metric(self, mocked_parse_mri):
         # Store valid metric
         self.store_transaction_metric(
             1,
@@ -2401,7 +2398,7 @@ class GetCustomMeasurementsTestCase(MetricsEnhancedPerformanceTestCase):
         )
 
         # mock mri failing to parse the metric
-        mock.return_value = None
+        mocked_parse_mri.return_value = None
         result = get_custom_measurements(
             project_ids=[self.project.id],
             organization_id=self.organization.id,

@@ -5,7 +5,7 @@ import partition from 'lodash/partition';
 import {CompactSelect} from 'sentry/components/compactSelect';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {PlatformKey, ProjectKey} from 'sentry/types';
+import type {PlatformKey, ProjectKey} from 'sentry/types/project';
 import {useApiQuery} from 'sentry/utils/queryClient';
 import useOrganization from 'sentry/utils/useOrganization';
 import type {QuickStartProps} from 'sentry/views/monitors/components/quickStartEntries';
@@ -127,7 +127,17 @@ const onboardingGuides: Record<string, OnboardingGuide> = {
   },
 };
 
-const guideToSelectOption = ({key, label}) => ({label, value: key});
+/**
+ * The platforms that are well supported for crons
+ */
+export const platformsWithGuides = Array.from(
+  Object.values(onboardingGuides).reduce((combinedPlatforms, guide) => {
+    guide.platforms?.forEach(platform => combinedPlatforms.add(platform));
+    return combinedPlatforms;
+  }, new Set())
+);
+
+const guideToSelectOption = ({key, label}: any) => ({label, value: key});
 
 export default function MonitorQuickStartGuide({monitor}: Props) {
   const org = useOrganization();
@@ -156,10 +166,10 @@ export default function MonitorQuickStartGuide({monitor}: Props) {
     guide.platforms?.has(monitor.project.platform ?? 'other')
   );
 
-  const defaultExample = platformSpecific.length > 0 ? platformSpecific[0].key : 'cli';
+  const defaultExample = platformSpecific.length > 0 ? platformSpecific[0]!.key : 'cli';
 
   const [selectedGuide, setSelectedGuide] = useState(defaultExample);
-  const {Guide} = onboardingGuides[selectedGuide];
+  const {Guide} = onboardingGuides[selectedGuide]!;
 
   return (
     <Container>
@@ -173,8 +183,8 @@ export default function MonitorQuickStartGuide({monitor}: Props) {
         orgSlug={org.slug}
         orgId={org.id}
         projectId={monitor.project.id}
-        publicKey={projectKeys?.[0].public}
-        dsnKey={projectKeys?.[0].dsn.public}
+        cronsUrl={projectKeys?.[0]!.dsn.crons}
+        dsnKey={projectKeys?.[0]!.dsn.public}
       />
     </Container>
   );

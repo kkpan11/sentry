@@ -1,5 +1,4 @@
 import {Fragment} from 'react';
-import {browserHistory} from 'react-router';
 
 import {
   addErrorMessage,
@@ -18,10 +17,11 @@ import PanelBody from 'sentry/components/panels/panelBody';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import TextCopyInput from 'sentry/components/textCopyInput';
 import {t} from 'sentry/locale';
-import type {Organization, ServiceHook} from 'sentry/types';
+import type {ServiceHook} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import getDynamicText from 'sentry/utils/getDynamicText';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
-import DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
 import ServiceHookSettingsForm from 'sentry/views/settings/project/serviceHookSettingsForm';
 
@@ -110,9 +110,12 @@ type Props = {
 };
 type State = {
   hook: ServiceHook | null;
-} & DeprecatedAsyncView['state'];
+} & DeprecatedAsyncComponent['state'];
 
-export default class ProjectServiceHookDetails extends DeprecatedAsyncView<Props, State> {
+export default class ProjectServiceHookDetails extends DeprecatedAsyncComponent<
+  Props,
+  State
+> {
   getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {organization} = this.props;
     const {projectId, hookId} = this.props.params;

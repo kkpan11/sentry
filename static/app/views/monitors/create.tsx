@@ -1,14 +1,13 @@
-import {Fragment} from 'react';
-import {browserHistory} from 'react-router';
-
 import {Breadcrumbs} from 'sentry/components/breadcrumbs';
 import FeedbackWidgetButton from 'sentry/components/feedback/widget/feedbackWidgetButton';
 import * as Layout from 'sentry/components/layouts/thirds';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import {t} from 'sentry/locale';
 import HookStore from 'sentry/stores/hookStore';
+import {browserHistory} from 'sentry/utils/browserHistory';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import useOrganization from 'sentry/utils/useOrganization';
 import usePageFilters from 'sentry/utils/usePageFilters';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 
 import MonitorForm from './components/monitorForm';
 import type {Monitor} from './types';
@@ -29,7 +28,7 @@ function CreateMonitor() {
     };
     browserHistory.push(
       normalizeUrl({
-        pathname: `/organizations/${orgSlug}/crons/${data.slug}/`,
+        pathname: `/organizations/${orgSlug}/crons/${data.project.slug}/${data.slug}/`,
         query: endpointOptions.query,
       })
     );
@@ -37,7 +36,7 @@ function CreateMonitor() {
   }
 
   return (
-    <Fragment>
+    <SentryDocumentTitle title={t('New Monitor — Crons')}>
       <Layout.Header>
         <Layout.HeaderContent>
           <Breadcrumbs
@@ -67,7 +66,7 @@ function CreateMonitor() {
           />
         </Layout.Main>
       </Layout.Body>
-    </Fragment>
+    </SentryDocumentTitle>
   );
 }
 

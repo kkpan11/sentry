@@ -98,6 +98,19 @@ interface UseHoverOverlayProps {
    * Offset along the main axis.
    */
   offset?: number;
+
+  /**
+   * Callback whenever the hovercard is blurred
+   * See also `onHover`
+   */
+  onBlur?: () => void;
+
+  /**
+   * Callback whenever the hovercard is hovered
+   * See also `onBlur`
+   */
+  onHover?: () => void;
+
   /**
    * Position for the overlay.
    */
@@ -115,6 +128,7 @@ interface UseHoverOverlayProps {
    * If child node supports ref forwarding, you can skip apply a wrapper
    */
   skipWrapper?: boolean;
+
   /**
    * Color of the dotted underline, if available. See also: showUnderline.
    */
@@ -122,7 +136,16 @@ interface UseHoverOverlayProps {
 }
 
 function isOverflown(el: Element): boolean {
-  return el.scrollWidth > el.clientWidth || Array.from(el.children).some(isOverflown);
+  // Safari seems to calculate scrollWidth incorrectly, causing isOverflown to always return true in some cases.
+  // Adding a 2 pixel tolerance seems to account for this discrepancy.
+  const tolerance =
+    navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome')
+      ? 2
+      : 0;
+  return (
+    el.scrollWidth - el.clientWidth > tolerance ||
+    Array.from(el.children).some(isOverflown)
+  );
 }
 
 function maybeClearRefTimeout(ref: React.MutableRefObject<number | undefined>) {
@@ -150,6 +173,8 @@ function useHoverOverlay(
     offset = 8,
     position = 'top',
     containerDisplayMode = 'inline-block',
+    onHover,
+    onBlur,
   }: UseHoverOverlayProps
 ) {
   const theme = useTheme();
@@ -157,6 +182,14 @@ function useHoverOverlay(
 
   const [isVisible, setIsVisible] = useState(forceVisible ?? false);
   const isOpen = forceVisible ?? isVisible;
+
+  useEffect(() => {
+    if (isOpen) {
+      onHover?.();
+    } else {
+      onBlur?.();
+    }
+  }, [isOpen, onBlur, onHover]);
 
   const [triggerElement, setTriggerElement] = useState<HTMLElement | null>(null);
   const [overlayElement, setOverlayElement] = useState<HTMLElement | null>(null);

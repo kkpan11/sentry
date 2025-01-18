@@ -1,11 +1,10 @@
 import {Component} from 'react';
-import type {InjectedRouter} from 'react-router';
 import styled from '@emotion/styled';
 import type {LineSeriesOption} from 'echarts';
 import type {Location} from 'history';
 import compact from 'lodash/compact';
 import pick from 'lodash/pick';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 import type {Client} from 'sentry/api';
 import ChartZoom from 'sentry/components/charts/chartZoom';
@@ -37,13 +36,15 @@ import Placeholder from 'sentry/components/placeholder';
 import {URL_PARAM} from 'sentry/constants/pageFilters';
 import {t, tct, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, PageFilters, SessionApiResponse} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
 import type {EChartClickHandler} from 'sentry/types/echarts';
-import {formatVersion} from 'sentry/utils/formatters';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization, SessionApiResponse} from 'sentry/types/organization';
 import {decodeScalar} from 'sentry/utils/queryString';
 import {getAdoptionSeries, getCount} from 'sentry/utils/sessions';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
+import {formatVersion} from 'sentry/utils/versions/formatVersion';
 import withApi from 'sentry/utils/withApi';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 import {sessionDisplayToField} from 'sentry/views/releases/list/releasesRequest';
 
 import {ReleasesDisplayOption} from './releasesDisplayOptions';
@@ -94,7 +95,7 @@ class ReleasesAdoptionChart extends Component<Props> {
       response?.groups.map(group => group.by.release as string) ?? [];
     if (response?.groups && response.groups.length > 50) {
       releases = response!.groups
-        .sort((a, b) => b.totals['sum(session)'] - a.totals['sum(session)'])
+        .sort((a, b) => b.totals['sum(session)']! - a.totals['sum(session)']!)
         .slice(0, 50)
         .map(group => group.by.release as string);
     }
@@ -150,7 +151,7 @@ class ReleasesAdoptionChart extends Component<Props> {
   }
 
   render() {
-    const {activeDisplay, router, selection, api, organization, location} = this.props;
+    const {activeDisplay, selection, api, organization, location} = this.props;
     const {start, end, period, utc} = selection.datetime;
     const interval = this.getInterval();
     const field = sessionDisplayToField(activeDisplay);
@@ -175,11 +176,11 @@ class ReleasesAdoptionChart extends Component<Props> {
             return null;
           }
 
-          const numDataPoints = releasesSeries[0].data.length;
-          const xAxisData = releasesSeries[0].data.map(point => point.name);
+          const numDataPoints = releasesSeries[0]!.data.length;
+          const xAxisData = releasesSeries[0]!.data.map(point => point.name);
           const hideLastPoint =
             releasesSeries.findIndex(
-              series => series.data[numDataPoints - 1].value > 0
+              series => series.data[numDataPoints - 1]!.value > 0
             ) === -1;
 
           return (
@@ -190,13 +191,7 @@ class ReleasesAdoptionChart extends Component<Props> {
                 </ChartHeader>
                 <TransitionChart loading={loading} reloading={reloading}>
                   <TransparentLoadingMask visible={reloading} />
-                  <ChartZoom
-                    router={router}
-                    period={period}
-                    utc={utc}
-                    start={start}
-                    end={end}
-                  >
+                  <ChartZoom period={period} utc={utc} start={start} end={end}>
                     {zoomRenderProps => (
                       <LineChart
                         {...zoomRenderProps}
@@ -226,16 +221,21 @@ class ReleasesAdoptionChart extends Component<Props> {
                             const series = Array.isArray(seriesParams)
                               ? seriesParams
                               : [seriesParams];
+                            // @ts-ignore TS(2532): Object is possibly 'undefined'.
                             const timestamp = series[0].data[0];
                             const [first, second, third, ...rest] = series
+                              // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
                               .filter(s => s.data[1] > 0)
+                              // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
                               .sort((a, b) => b.data[1] - a.data[1]);
 
+                            // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
                             const restSum = rest.reduce((acc, s) => acc + s.data[1], 0);
 
                             const seriesToRender = compact([first, second, third]);
 
                             if (rest.length) {
+                              // @ts-ignore TS(2345): Argument of type '{ seriesName: string; data: any[... Remove this comment to see the full error message
                               seriesToRender.push({
                                 seriesName: tn('%s Other', '%s Others', rest.length),
                                 data: [timestamp, restSum],
@@ -254,10 +254,10 @@ class ReleasesAdoptionChart extends Component<Props> {
                             };
                             const intervalStart = moment(timestamp).format('MMM D LT');
                             const intervalEnd = (
-                              series[0].dataIndex === numDataPoints - 1
+                              series[0]?.dataIndex === numDataPoints - 1
                                 ? moment(response?.end)
                                 : moment(timestamp).add(
-                                    parseInt(periodObj.period, 10),
+                                    parseInt(periodObj.period!, 10),
                                     periodObj.periodLength as StatsPeriodType
                                   )
                             ).format('MMM D LT');
@@ -272,6 +272,7 @@ class ReleasesAdoptionChart extends Component<Props> {
                                     }<strong>${
                                       s.seriesName &&
                                       truncationFormatter(s.seriesName, 32)
+                                      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
                                     }</strong></span>${s.data[1].toFixed(2)}%</div>`
                                 )
                                 .join(''),

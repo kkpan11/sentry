@@ -6,16 +6,13 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from sentry import release_health
 from sentry.models.releaseprojectenvironment import ReleaseProjectEnvironment
 from sentry.release_health.metrics import MetricsReleaseHealthBackend
 from sentry.snuba.metrics import to_intervals
-from sentry.testutils.cases import APITestCase, BaseMetricsTestCase, SnubaTestCase
+from sentry.testutils.cases import APITestCase, BaseMetricsTestCase
 from sentry.testutils.helpers.datetime import freeze_time
 from sentry.testutils.helpers.link_header import parse_link_header
-from sentry.testutils.silo import region_silo_test
 from sentry.utils.cursors import Cursor
-from sentry.utils.dates import to_timestamp
 
 pytestmark = pytest.mark.sentry_metrics
 
@@ -38,7 +35,7 @@ MOCK_DATETIME_PLUS_ONE_HOUR = MOCK_DATETIME + datetime.timedelta(hours=1)
 SNUBA_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 MOCK_DATETIME_START_OF_DAY = MOCK_DATETIME.replace(hour=0, minute=0, second=0)
 
-TIMESTAMP = to_timestamp(MOCK_DATETIME)
+TIMESTAMP = MOCK_DATETIME.timestamp()
 RECEIVED = TIMESTAMP
 SESSION_STARTED = TIMESTAMP // 3600 * 3600  # round to the hour
 
@@ -88,7 +85,7 @@ def adjust_end(end: datetime.datetime, interval: int) -> datetime.datetime:
     return end
 
 
-class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
+class OrganizationSessionsEndpointTest(APITestCase, BaseMetricsTestCase):
     def setUp(self):
         super().setUp()
         self.setup_fixture()
@@ -135,7 +132,7 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
         self.login_as(user=user or self.user)
         url = reverse(
             "sentry-api-0-organization-sessions",
-            kwargs={"organization_slug": (org or self.organization).slug},
+            kwargs={"organization_id_or_slug": (org or self.organization).slug},
         )
         return self.client.get(url, query, format="json")
 
@@ -361,15 +358,10 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
             )
             assert response.status_code == 200, response.content
 
-            if release_health.backend.is_metrics_based():
-                # With the metrics backend, we should get exactly what we asked for,
-                # 6 intervals with 10 second length. However, since we add both the
-                # starting and ending interval we get 7 intervals.
-                assert len(response.data["intervals"]) == 7
-            else:
-                # With the sessions backend, the resolution will be 1m and will include starting and ending
-                # minute so 2 intervals
-                assert len(response.data["intervals"]) == 2
+            # With the metrics backend, we should get exactly what we asked for,
+            # 6 intervals with 10 second length. However, since we add both the
+            # starting and ending interval we get 7 intervals.
+            assert len(response.data["intervals"]) == 7
 
     @freeze_time(MOCK_DATETIME)
     def test_filter_projects(self):
@@ -402,36 +394,26 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
         response = req()
         assert response.status_code == 200
 
-        if release_health.backend.is_metrics_based():
-            # Both these fields are supported by the metrics backend
-            assert response.data["groups"] == [
-                {
-                    "by": {},
-                    "totals": {"anr_rate()": 0.0, "crash_free_rate(user)": 1.0},
-                    "series": {"anr_rate()": [None, 0.0], "crash_free_rate(user)": [None, 1.0]},
-                }
-            ]
-        else:
-            # Both these fields are not supported by the sessions backend
-            assert response.data["groups"] == []
+        # Both these fields are supported by the metrics backend
+        assert response.data["groups"] == [
+            {
+                "by": {},
+                "totals": {"anr_rate()": 0.0, "crash_free_rate(user)": 1.0},
+                "series": {"anr_rate()": [None, 0.0], "crash_free_rate(user)": [None, 1.0]},
+            }
+        ]
 
         response = req(field=["anr_rate()", "sum(session)"])
         assert response.status_code == 200
 
-        if release_health.backend.is_metrics_based():
-            # Both these fields are supported by the metrics backend
-            assert response.data["groups"] == [
-                {
-                    "by": {},
-                    "totals": {"anr_rate()": 0.0, "sum(session)": 9},
-                    "series": {"anr_rate()": [None, 0.0], "sum(session)": [0, 9]},
-                }
-            ]
-        else:
-            # Only sum(session) is supported by the sessions backend
-            assert response.data["groups"] == [
-                {"by": {}, "totals": {"sum(session)": 9}, "series": {"sum(session)": [0, 9]}}
-            ]
+        # Both these fields are supported by the metrics backend
+        assert response.data["groups"] == [
+            {
+                "by": {},
+                "totals": {"anr_rate()": 0.0, "sum(session)": 9},
+                "series": {"anr_rate()": [None, 0.0], "sum(session)": [0, 9]},
+            }
+        ]
 
     @freeze_time(MOCK_DATETIME)
     def test_filter_environment(self):
@@ -958,8 +940,9 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
     @freeze_time(MOCK_DATETIME)
     def test_snuba_limit_exceeded(self):
         # 2 * 4 => only show two groups
-        with patch("sentry.snuba.sessions_v2.SNUBA_LIMIT", 8), patch(
-            "sentry.snuba.metrics.query.MAX_POINTS", 8
+        with (
+            patch("sentry.snuba.sessions_v2.SNUBA_LIMIT", 8),
+            patch("sentry.snuba.metrics.query.MAX_POINTS", 8),
         ):
             response = self.do_request(
                 {
@@ -998,8 +981,9 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
     def test_snuba_limit_exceeded_groupby_status(self):
         """Get consistent result when grouping by status"""
         # 2 * 4 => only show two groups
-        with patch("sentry.snuba.sessions_v2.SNUBA_LIMIT", 8), patch(
-            "sentry.snuba.metrics.query.MAX_POINTS", 8
+        with (
+            patch("sentry.snuba.sessions_v2.SNUBA_LIMIT", 8),
+            patch("sentry.snuba.metrics.query.MAX_POINTS", 8),
         ):
             response = self.do_request(
                 {
@@ -1311,14 +1295,6 @@ class OrganizationSessionsEndpointTest(APITestCase, SnubaTestCase):
                 "series": {"sum(session)": [0, 1]},
             },
         ]
-
-
-@region_silo_test
-@patch("sentry.release_health.backend", MetricsReleaseHealthBackend())
-class OrganizationSessionsEndpointMetricsTest(
-    BaseMetricsTestCase, OrganizationSessionsEndpointTest
-):
-    """Repeat all tests with metrics backend"""
 
     @freeze_time(MOCK_DATETIME)
     def test_orderby(self):
@@ -1891,14 +1867,13 @@ class OrganizationSessionsEndpointMetricsTest(
             ]
 
 
-@region_silo_test
 @patch("sentry.release_health.backend", MetricsReleaseHealthBackend())
 class SessionsMetricsSortReleaseTimestampTest(BaseMetricsTestCase, APITestCase):
     def do_request(self, query, user=None, org=None):
         self.login_as(user=user or self.user)
         url = reverse(
             "sentry-api-0-organization-sessions",
-            kwargs={"organization_slug": (org or self.organization).slug},
+            kwargs={"organization_id_or_slug": (org or self.organization).slug},
         )
         return self.client.get(url, query, format="json")
 

@@ -1,11 +1,13 @@
-import {Fragment, lazy, Suspense} from 'react';
+import {Fragment, lazy, type ReactNode, Suspense} from 'react';
 import {css} from '@emotion/react';
 
 import {openModal} from 'sentry/actionCreators/modal';
-import {Button} from 'sentry/components/button';
+import {Button, type ButtonProps} from 'sentry/components/button';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import {t} from 'sentry/locale';
+import type {Event} from 'sentry/types/event';
 import type ReplayReader from 'sentry/utils/replays/replayReader';
+import type {HydrationErrorFrame} from 'sentry/utils/replays/types';
 import useOrganization from 'sentry/utils/useOrganization';
 
 const LazyComparisonModal = lazy(
@@ -13,24 +15,33 @@ const LazyComparisonModal = lazy(
 );
 
 interface Props {
-  leftTimestamp: number;
-  replay: null | ReplayReader;
-  rightTimestamp: number;
+  children: ReactNode;
+  frameOrEvent: HydrationErrorFrame | Event;
+  initialLeftOffsetMs: number;
+  initialRightOffsetMs: number;
+  replay: ReplayReader;
+  surface: string;
+  size?: ButtonProps['size'];
 }
 
 export function OpenReplayComparisonButton({
-  leftTimestamp,
+  children,
+  frameOrEvent,
+  initialLeftOffsetMs,
+  initialRightOffsetMs,
   replay,
-  rightTimestamp,
+  size,
+  surface,
 }: Props) {
   const organization = useOrganization();
 
   return (
     <Button
       role="button"
-      size="xs"
-      analyticsEventKey="replay.details-hydration-modal-opened"
-      analyticsEventName="Replay Details Hydration Modal Opened"
+      size={size}
+      analyticsEventKey="replay.hydration-modal.opened"
+      analyticsEventName="Hydration Modal Opened"
+      analyticsParams={{surface, organization}}
       onClick={event => {
         event.stopPropagation();
         openModal(
@@ -39,7 +50,9 @@ export function OpenReplayComparisonButton({
               fallback={
                 <Fragment>
                   <deps.Header closeButton>
-                    <deps.Header>{t('Hydration Error')}</deps.Header>
+                    <deps.Header>
+                      <h4>{t('Hydration Error')}</h4>
+                    </deps.Header>
                   </deps.Header>
                   <deps.Body>
                     <LoadingIndicator />
@@ -50,8 +63,9 @@ export function OpenReplayComparisonButton({
               <LazyComparisonModal
                 replay={replay}
                 organization={organization}
-                leftTimestamp={leftTimestamp}
-                rightTimestamp={rightTimestamp}
+                frameOrEvent={frameOrEvent}
+                initialLeftOffsetMs={initialLeftOffsetMs}
+                initialRightOffsetMs={initialRightOffsetMs}
                 {...deps}
               />
             </Suspense>
@@ -60,13 +74,24 @@ export function OpenReplayComparisonButton({
         );
       }}
     >
-      {t('Open Hydration Diff')}
+      {children}
     </Button>
   );
 }
 
 const modalCss = css`
-  width: 95vw;
-  min-height: 80vh;
-  max-height: 95vh;
+  /* Swap typical modal margin and padding
+   * We want a minimal space around the modal (hence, 30px 16px)
+   * But this space should also be clickable, so it's not the padding.
+   */
+  margin: 30px 16px !important;
+  padding: 0 !important;
+  height: calc(100% - 60px);
+  width: calc(100% - 32px);
+  display: flex;
+  & > * {
+    flex-grow: 1;
+    display: grid;
+    grid-template-rows: max-content 1fr;
+  }
 `;

@@ -6,25 +6,18 @@ import {
 import {displayReprocessEventAction} from 'sentry/utils/displayReprocessEventAction';
 
 describe('DisplayReprocessEventAction', function () {
-  const orgFeatures = ['reprocessing-v2'];
-
-  it('returns false in case of no reprocessing-v2 feature', function () {
-    const event = EventStacktraceMessageFixture();
-    expect(displayReprocessEventAction([], event)).toBe(false);
-  });
-
   it('returns false in case of no event', function () {
-    expect(displayReprocessEventAction(orgFeatures)).toBe(false);
+    expect(displayReprocessEventAction(null)).toBe(false);
   });
 
   it('returns false if no exception entry is found', function () {
     const event = EventStacktraceMessageFixture();
-    expect(displayReprocessEventAction(orgFeatures, event)).toBe(false);
+    expect(displayReprocessEventAction(event)).toBe(false);
   });
 
   it('returns false if the event is not a mini-dump event or an Apple crash report event or a Native event', function () {
     const event = EventStacktraceExceptionFixture();
-    expect(displayReprocessEventAction(orgFeatures, event)).toBe(false);
+    expect(displayReprocessEventAction(event)).toBe(false);
   });
 
   describe('returns true', function () {
@@ -35,7 +28,7 @@ describe('DisplayReprocessEventAction', function () {
             platform: 'native',
           });
 
-          expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+          expect(displayReprocessEventAction(event)).toBe(true);
         });
 
         it('cocoa', function () {
@@ -43,7 +36,7 @@ describe('DisplayReprocessEventAction', function () {
             platform: 'cocoa',
           });
 
-          expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+          expect(displayReprocessEventAction(event)).toBe(true);
         });
       });
 
@@ -53,9 +46,9 @@ describe('DisplayReprocessEventAction', function () {
             platform: undefined,
           });
 
-          event.entries[0].data.values[0].stacktrace.frames[0].platform = 'native';
+          event.entries[0]!.data.values[0].stacktrace.frames[0].platform = 'native';
 
-          expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+          expect(displayReprocessEventAction(event)).toBe(true);
         });
 
         it('cocoa', function () {
@@ -63,9 +56,9 @@ describe('DisplayReprocessEventAction', function () {
             platform: undefined,
           });
 
-          event.entries[0].data.values[0].stacktrace.frames[0].platform = 'cocoa';
+          event.entries[0]!.data.values[0].stacktrace.frames[0].platform = 'cocoa';
 
-          expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+          expect(displayReprocessEventAction(event)).toBe(true);
         });
       });
     });
@@ -75,14 +68,14 @@ describe('DisplayReprocessEventAction', function () {
         platform: undefined,
       });
 
-      event.entries[0].data.values[0] = {
-        ...event.entries[0].data.values[0],
+      event.entries[0]!.data.values[0] = {
+        ...event.entries[0]!.data.values[0],
         mechanism: {
           type: 'minidump',
         },
       };
 
-      expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+      expect(displayReprocessEventAction(event)).toBe(true);
     });
 
     it('apple crash report event', function () {
@@ -90,14 +83,14 @@ describe('DisplayReprocessEventAction', function () {
         platform: undefined,
       });
 
-      event.entries[0].data.values[0] = {
-        ...event.entries[0].data.values[0],
+      event.entries[0]!.data.values[0] = {
+        ...event.entries[0]!.data.values[0],
         mechanism: {
           type: 'applecrashreport',
         },
       };
 
-      expect(displayReprocessEventAction(orgFeatures, event)).toBe(true);
+      expect(displayReprocessEventAction(event)).toBe(true);
     });
   });
 });

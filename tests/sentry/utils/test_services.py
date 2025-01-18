@@ -187,16 +187,3 @@ def test_make_writebehind_selector_int_key(register_option):
     with override_options({"feature.rollout": 1.0}):
         result = selector(context, "do_thing", {})
         assert result == ["new", "old"]
-
-
-def test_make_writebehind_selector_invalid_key(register_option):
-    context = Mock()
-    selector = make_writebehind_selector(
-        option_name="feature.rollout",
-        move_to="new",
-        move_from="old",
-        key_fetch=lambda *args: {"lol": "nope"},  # type: ignore
-    )
-    with override_options({"feature.rollout": 1.0}):
-        result = selector(context, "do_thing", {})
-        assert result == ["old"]

@@ -9,8 +9,9 @@ import PanelBody from 'sentry/components/panels/panelBody';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import Placeholder from 'sentry/components/placeholder';
 import {t} from 'sentry/locale';
-import type {Organization, Project} from 'sentry/types';
 import type {Series} from 'sentry/types/echarts';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import theme from 'sentry/utils/theme';
 import withApi from 'sentry/utils/withApi';
 import type {UsageSeries} from 'sentry/views/organizationStats/types';
@@ -64,16 +65,16 @@ class ProjectFiltersChart extends Component<Props, State> {
 
   formatData(rawData: UsageSeries) {
     const formattedData = rawData.groups
-      .filter(group => STAT_OPS[group.by.reason])
+      .filter(group => STAT_OPS[group.by.reason as keyof typeof STAT_OPS])
       .map(group => {
-        const {title, color} = STAT_OPS[group.by.reason];
+        const {title, color} = STAT_OPS[group.by.reason as keyof typeof STAT_OPS];
         return {
           seriesName: title,
           color,
           data: rawData.intervals
             .map((interval, index) => ({
               name: interval,
-              value: group.series['sum(quantity)'][index],
+              value: group.series['sum(quantity)']![index]!,
             }))
             .filter(dataPoint => !!dataPoint.value),
         };

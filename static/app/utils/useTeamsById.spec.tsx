@@ -1,7 +1,7 @@
 import {OrganizationFixture} from 'sentry-fixture/organization';
 import {TeamFixture} from 'sentry-fixture/team';
 
-import {reactHooks} from 'sentry-test/reactTestingLibrary';
+import {renderHook, waitFor} from 'sentry-test/reactTestingLibrary';
 
 import OrganizationStore from 'sentry/stores/organizationStore';
 import TeamStore from 'sentry/stores/teamStore';
@@ -34,7 +34,7 @@ describe('useTeamsById', function () {
   it('provides teams from the team store', function () {
     TeamStore.loadInitialData(mockTeams);
 
-    const {result} = reactHooks.renderHook(useTeamsById, {wrapper});
+    const {result} = renderHook(useTeamsById, {wrapper});
     const {teams} = result.current;
 
     expect(teams).toEqual(mockTeams);
@@ -48,7 +48,7 @@ describe('useTeamsById', function () {
     });
     // TeamStore.loadInitialData not yet called
     expect(TeamStore.getState().loading).toBe(true);
-    const {result} = reactHooks.renderHook(useTeamsById, {
+    const {result} = renderHook(useTeamsById, {
       initialProps: {slugs: ['foo']},
       wrapper,
     });
@@ -66,7 +66,7 @@ describe('useTeamsById', function () {
       body: [teamFoo],
     });
 
-    const {result, waitFor} = reactHooks.renderHook(useTeamsById, {
+    const {result} = renderHook(useTeamsById, {
       initialProps: {slugs: ['foo']},
       wrapper,
     });
@@ -75,7 +75,7 @@ describe('useTeamsById', function () {
     expect(mockRequest).toHaveBeenCalled();
 
     await waitFor(() => {
-      expect(result.current.teams.length).toBe(1);
+      expect(result.current.teams).toHaveLength(1);
     });
 
     const {teams} = result.current;
@@ -86,8 +86,8 @@ describe('useTeamsById', function () {
   it('only loads slugs when needed', function () {
     TeamStore.loadInitialData(mockTeams);
 
-    const {result} = reactHooks.renderHook(useTeamsById, {
-      initialProps: {slugs: [mockTeams[0].slug]},
+    const {result} = renderHook(useTeamsById, {
+      initialProps: {slugs: [mockTeams[0]!.slug]},
       wrapper,
     });
 
@@ -106,7 +106,7 @@ describe('useTeamsById', function () {
 
     TeamStore.loadInitialData(mockTeams);
 
-    const {result, waitFor} = reactHooks.renderHook(useTeamsById, {
+    const {result} = renderHook(useTeamsById, {
       initialProps: {ids: ['2']},
       wrapper,
     });
@@ -114,7 +114,7 @@ describe('useTeamsById', function () {
     expect(result.current.isLoading).toBe(true);
     expect(mockRequest).toHaveBeenCalled();
 
-    await waitFor(() => expect(result.current.teams.length).toBe(1));
+    await waitFor(() => expect(result.current.teams).toHaveLength(1));
 
     const {teams} = result.current;
     expect(teams).toEqual(expect.arrayContaining(requestedTeams));
@@ -124,8 +124,8 @@ describe('useTeamsById', function () {
   it('only loads ids when needed', function () {
     TeamStore.loadInitialData(mockTeams);
 
-    const {result} = reactHooks.renderHook(useTeamsById, {
-      initialProps: {ids: [mockTeams[0].id]},
+    const {result} = renderHook(useTeamsById, {
+      initialProps: {ids: [mockTeams[0]!.id]},
       wrapper,
     });
 

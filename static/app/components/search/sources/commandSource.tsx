@@ -1,5 +1,4 @@
 import {Component} from 'react';
-import type {PlainRoute} from 'react-router';
 
 import {openHelpSearchModal} from 'sentry/actionCreators/modal';
 import {openSudo} from 'sentry/actionCreators/sudoModal';
@@ -7,8 +6,10 @@ import Access from 'sentry/components/acl/access';
 import {NODE_ENV, USING_CUSTOMER_DOMAIN} from 'sentry/constants';
 import {t, toggleLocaleDebug} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
+import type {PlainRoute} from 'sentry/types/legacyReactRouter';
 import type {Fuse} from 'sentry/utils/fuzzySearch';
 import {createFuzzySearch} from 'sentry/utils/fuzzySearch';
+import {removeBodyTheme} from 'sentry/utils/removeBodyTheme';
 
 import type {ChildProps, ResultItem} from './types';
 
@@ -44,8 +45,10 @@ const ACTIONS: Action[] = [
     title: t('Toggle dark mode'),
     description: t('Toggle dark mode (superuser only atm)'),
     requiresSuperuser: true,
-    action: () =>
-      ConfigStore.set('theme', ConfigStore.get('theme') === 'dark' ? 'light' : 'dark'),
+    action: () => {
+      removeBodyTheme();
+      ConfigStore.set('theme', ConfigStore.get('theme') === 'dark' ? 'light' : 'dark');
+    },
   },
 
   {
@@ -69,7 +72,7 @@ const ACTIONS: Action[] = [
 ];
 
 // Add a command palette option for opening in production when using dev-ui
-if (NODE_ENV === 'development' && window?.__initialData?.isOnPremise === false) {
+if (NODE_ENV === 'development' && window?.__initialData?.isSelfHosted === false) {
   const customerUrl = new URL(
     USING_CUSTOMER_DOMAIN && window?.__initialData?.customerDomain?.organizationUrl
       ? window.__initialData.customerDomain.organizationUrl
@@ -167,7 +170,7 @@ class CommandSource extends Component<Props, State> {
 
 function CommandSourceWithFeature(props: Omit<Props, 'isSuperuser'>) {
   return (
-    <Access isSuperuser>
+    <Access access={[]} isSuperuser>
       {({hasSuperuser}) => <CommandSource {...props} isSuperuser={hasSuperuser} />}
     </Access>
   );

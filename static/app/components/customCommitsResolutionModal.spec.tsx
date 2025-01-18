@@ -1,14 +1,14 @@
-import selectEvent from 'react-select-event';
 import styled from '@emotion/styled';
 import {CommitFixture} from 'sentry-fixture/commit';
 
 import {render, screen, userEvent, waitFor} from 'sentry-test/reactTestingLibrary';
+import selectEvent from 'sentry-test/selectEvent';
 
 import CustomCommitsResolutionModal from 'sentry/components/customCommitsResolutionModal';
 import {makeCloseButton} from 'sentry/components/globalModal/components';
 
 describe('CustomCommitsResolutionModal', function () {
-  let commitsMock;
+  let commitsMock: any;
   beforeEach(function () {
     commitsMock = MockApiClient.addMockResponse({
       url: '/projects/org-slug/project-slug/commits/',
@@ -19,7 +19,7 @@ describe('CustomCommitsResolutionModal', function () {
   it('can select a commit', async function () {
     const onSelected = jest.fn();
 
-    const wrapper = styled(p => p.children);
+    const wrapper = styled((p: any) => p.children);
     render(
       <CustomCommitsResolutionModal
         Header={p => <span>{p.children}</span>}

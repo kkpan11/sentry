@@ -2,17 +2,20 @@ import {ProjectFixture} from 'sentry-fixture/project';
 
 import {addMetricsDataMock} from 'sentry-test/performance/addMetricsDataMock';
 import {initializeData} from 'sentry-test/performance/initializePerformanceData';
-import {makeTestQueryClient} from 'sentry-test/queryClient';
 import {act, render, screen} from 'sentry-test/reactTestingLibrary';
 
 import TeamStore from 'sentry/stores/teamStore';
 import {MetricsCardinalityProvider} from 'sentry/utils/performance/contexts/metricsCardinality';
-import {QueryClientProvider} from 'sentry/utils/queryClient';
-import {OrganizationContext} from 'sentry/views/organizationContext';
 import {generatePerformanceEventView} from 'sentry/views/performance/data';
 import {PerformanceLanding} from 'sentry/views/performance/landing';
 
-function WrappedComponent({data, withStaticFilters = true}) {
+function WrappedComponent({
+  data,
+  withStaticFilters = true,
+}: {
+  data: any;
+  withStaticFilters?: boolean;
+}) {
   const eventView = generatePerformanceEventView(
     data.router.location,
     data.projects,
@@ -23,28 +26,24 @@ function WrappedComponent({data, withStaticFilters = true}) {
   );
 
   return (
-    <QueryClientProvider client={makeTestQueryClient()}>
-      <OrganizationContext.Provider value={data.organization}>
-        <MetricsCardinalityProvider
-          location={data.router.location}
-          organization={data.organization}
-        >
-          <PerformanceLanding
-            router={data.router}
-            organization={data.organization}
-            location={data.router.location}
-            eventView={eventView}
-            projects={data.projects}
-            selection={eventView.getPageFilters()}
-            onboardingProject={undefined}
-            handleSearch={() => {}}
-            handleTrendsClick={() => {}}
-            setError={() => {}}
-            withStaticFilters={withStaticFilters}
-          />
-        </MetricsCardinalityProvider>
-      </OrganizationContext.Provider>
-    </QueryClientProvider>
+    <MetricsCardinalityProvider
+      location={data.router.location}
+      organization={data.organization}
+    >
+      <PerformanceLanding
+        router={data.router}
+        organization={data.organization}
+        location={data.router.location}
+        eventView={eventView}
+        projects={data.projects}
+        selection={eventView.getPageFilters()}
+        onboardingProject={undefined}
+        handleSearch={() => {}}
+        handleTrendsClick={() => {}}
+        setError={() => {}}
+        withStaticFilters={withStaticFilters}
+      />
+    </MetricsCardinalityProvider>
   );
 }
 
@@ -58,7 +57,6 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
 
   act(() => void TeamStore.loadInitialData([], false, null));
   beforeEach(function () {
-    // eslint-disable-next-line no-console
     jest.spyOn(console, 'error').mockImplementation(jest.fn());
 
     MockApiClient.addMockResponse({
@@ -133,7 +131,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(screen.getByTestId('performance-landing-v3')).toBeInTheDocument();
   });
 
@@ -146,7 +144,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
 
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
   });
@@ -164,7 +162,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
 
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
   });
@@ -182,7 +180,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-single-project-incompatible')
@@ -204,7 +202,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-multi-project-incompatible')
@@ -226,7 +224,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-multi-project-all-incompatible')
@@ -246,7 +244,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-unnamed-discover')
@@ -266,7 +264,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-unnamed-discover-or-set')
@@ -286,7 +284,7 @@ describe('Performance > Landing > MetricsDataSwitcher', function () {
       features,
     });
 
-    wrapper = render(<WrappedComponent data={data} />, data.routerContext);
+    wrapper = render(<WrappedComponent data={data} />, {organization: data.organization});
     expect(await screen.findByTestId('transaction-search-bar')).toBeInTheDocument();
     expect(
       await screen.findByTestId('landing-mep-alert-unnamed-discover')

@@ -1,11 +1,10 @@
 import re
-from functools import cached_property
 from unittest.mock import patch
 
-from django.urls import reverse
 from django.utils.text import slugify
 
 from sentry.api.endpoints.organization_projects_experiment import (
+    DISABLED_FEATURE_ERROR_STRING,
     OrganizationProjectsExperimentEndpoint,
     fetch_slugifed_email_username,
 )
@@ -17,10 +16,8 @@ from sentry.models.rule import Rule
 from sentry.models.team import Team
 from sentry.testutils.cases import APITestCase
 from sentry.testutils.helpers.features import with_feature
-from sentry.testutils.silo import region_silo_test
 
 
-@region_silo_test
 class OrganizationProjectsExperimentCreateTest(APITestCase):
     endpoint = "sentry-api-0-organization-projects-experiment"
     method = "post"
@@ -33,10 +30,6 @@ class OrganizationProjectsExperimentCreateTest(APITestCase):
         self.email_username = fetch_slugifed_email_username(self.user.email)
         self.t1 = f"team-{self.email_username}"
         self.mock_experiment_get = patch.object(ExperimentManager, "get", return_value=1).start()
-
-    @cached_property
-    def path(self):
-        return reverse(self.endpoint, args=[self.organization.slug])
 
     def validate_team_with_suffix(self, team: Team):
         pattern = rf"^{self.t1}-[a-z]{{3}}$"
@@ -267,3 +260,25 @@ class OrganizationProjectsExperimentCreateTest(APITestCase):
                 "detail": "You must be a member of the organization to join a new team as a Team Admin",
             }
         assert Team.objects.count() == prior_team_count
+
+    @with_feature(["organizations:team-roles"])
+    def test_disable_member_project_creation(self):
+        test_org = self.create_organization(flags=256)
+
+        test_member = self.create_user(is_superuser=False)
+        self.create_member(user=test_member, organization=test_org, role="member", teams=[])
+        self.login_as(user=test_member)
+        response = self.get_error_response(
+            test_org.slug,
+            name="foo",
+            status_code=403,
+        )
+        assert response.data["detail"] == DISABLED_FEATURE_ERROR_STRING
+        test_manager = self.create_user(is_superuser=False)
+        self.create_member(user=test_manager, organization=test_org, role="manager", teams=[])
+        self.login_as(user=test_manager)
+        self.get_success_response(
+            test_org.slug,
+            name="foo",
+            status_code=201,
+        )

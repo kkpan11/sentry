@@ -7,17 +7,17 @@ import TeamRoleSelect from 'sentry/components/teamRoleSelect';
 import {IconSubtract} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Member, Organization, Team, TeamMember, User} from 'sentry/types';
+import type {Organization, Team, TeamMember} from 'sentry/types/organization';
+import type {User} from 'sentry/types/user';
 import {getButtonHelpText} from 'sentry/views/settings/organizationTeams/utils';
 
 interface Props {
   hasWriteAccess: boolean;
-  isOrgOwner: boolean;
   member: TeamMember;
   organization: Organization;
-  removeMember: (member: Member) => void;
+  removeMember: (variables: {memberId: string}) => void;
   team: Team;
-  updateMemberRole: (member: Member, newRole: string) => void;
+  updateMemberRole: (variables: {memberId: string; newRole: string}) => void;
   user: User;
 }
 
@@ -27,7 +27,6 @@ function TeamMembersRow({
   member,
   user,
   hasWriteAccess,
-  isOrgOwner,
   removeMember,
   updateMemberRole,
 }: Props) {
@@ -36,7 +35,7 @@ function TeamMembersRow({
   return (
     <TeamRolesPanelItem key={member.id}>
       <div>
-        <IdBadge avatarSize={36} member={member} useLink orgId={organization.slug} />
+        <IdBadge avatarSize={36} member={member} />
       </div>
       <RoleSelectWrapper>
         <TeamRoleSelect
@@ -44,15 +43,14 @@ function TeamMembersRow({
           organization={organization}
           team={team}
           member={member}
-          onChangeTeamRole={newRole => updateMemberRole(member, newRole)}
+          onChangeTeamRole={newRole => updateMemberRole({memberId: member.id, newRole})}
         />
       </RoleSelectWrapper>
       <div>
         <RemoveButton
           hasWriteAccess={hasWriteAccess}
-          isOrgOwner={isOrgOwner}
           isSelf={isSelf}
-          onClick={() => removeMember(member)}
+          onClick={() => removeMember({memberId: member.id})}
           member={member}
         />
       </div>
@@ -62,12 +60,11 @@ function TeamMembersRow({
 
 function RemoveButton(props: {
   hasWriteAccess: boolean;
-  isOrgOwner: boolean;
   isSelf: boolean;
   member: TeamMember;
   onClick: () => void;
 }) {
-  const {member, hasWriteAccess, isOrgOwner, isSelf, onClick} = props;
+  const {member, hasWriteAccess, isSelf, onClick} = props;
 
   const canRemoveMember = hasWriteAccess || isSelf;
   if (!canRemoveMember) {
@@ -85,7 +82,7 @@ function RemoveButton(props: {
   }
 
   const isIdpProvisioned = member.flags['idp:provisioned'];
-  const buttonHelpText = getButtonHelpText(isIdpProvisioned, !isOrgOwner);
+  const buttonHelpText = getButtonHelpText(isIdpProvisioned);
 
   const buttonRemoveText = isSelf ? t('Leave') : t('Remove');
   return (

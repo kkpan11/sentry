@@ -1,5 +1,4 @@
 import {Component} from 'react';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 import type {Location, LocationDescriptorObject} from 'history';
 
@@ -13,11 +12,13 @@ import PerformanceDuration from 'sentry/components/performanceDuration';
 import {IconAdd} from 'sentry/icons/iconAdd';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import type EventView from 'sentry/utils/discover/eventView';
 import {fieldAlignment} from 'sentry/utils/discover/fields';
-import {formatPercentage} from 'sentry/utils/formatters';
+import {formatPercentage} from 'sentry/utils/number/formatPercentage';
 import type {
   TableData,
   TableDataRow,
@@ -103,7 +104,7 @@ export class TagValueTable extends Component<Props, State> {
     columns: TagsTableColumn[]
   ) => {
     return (column: TableColumn<TagsTableColumnKeys>, index: number): React.ReactNode =>
-      this.renderHeadCell(sortedEventView, tableMeta, column, columns[index]);
+      this.renderHeadCell(sortedEventView, tableMeta, column, columns[index]!);
   };
 
   handleTagValueClick = (location: Location, tagKey: string, tagValue: string) => {
@@ -170,6 +171,7 @@ export class TagValueTable extends Component<Props, State> {
     column: TableColumn<TagsTableColumnKeys>,
     dataRow: TableDataRow
   ): React.ReactNode => {
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     const value = dataRow[column.key];
     const {location, eventView, organization} = parentProps;
 
@@ -277,7 +279,6 @@ export class TagValueTable extends Component<Props, State> {
     const {
       eventView,
       tagKey,
-      location,
       isLoading,
       tableData,
       aggregateColumn,
@@ -319,7 +320,6 @@ export class TagValueTable extends Component<Props, State> {
               renderBodyCell: this.renderBodyCellWithData(this.props) as any,
               onResizeColumn: this.handleResizeColumn,
             }}
-            location={location}
           />
         </VisuallyCompleteWithData>
 

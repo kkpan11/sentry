@@ -1,5 +1,3 @@
-import type {InjectedRouter} from 'react-router';
-import {browserHistory} from 'react-router';
 import type {Location} from 'history';
 
 import type {Client} from 'sentry/api';
@@ -10,11 +8,15 @@ import {
   normalizeDateTimeString,
 } from 'sentry/components/organizations/pageFilters/parse';
 import {getPageFilterStorage} from 'sentry/components/organizations/pageFilters/persistence';
-import type {Organization, PageFilters, SavedQuery} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization, SavedQuery} from 'sentry/types/organization';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import EventView from 'sentry/utils/discover/eventView';
 import withApi from 'sentry/utils/withApi';
 import withOrganization from 'sentry/utils/withOrganization';
 import withPageFilters from 'sentry/utils/withPageFilters';
+import {getSavedQueryWithDataset} from 'sentry/views/discover/savedQuery/utils';
 
 import {Results} from './results';
 
@@ -36,7 +38,7 @@ type HomepageQueryState = DeprecatedAsyncComponent['state'] & {
 class HomepageQueryAPI extends DeprecatedAsyncComponent<Props, HomepageQueryState> {
   shouldReload = true;
 
-  componentDidUpdate(_, prevState) {
+  componentDidUpdate(_: any, prevState: any) {
     const hasFetchedSavedQuery = !prevState.savedQuery && this.state.savedQuery;
     const hasInitiallyLoaded = prevState.loading && !this.state.loading;
     const sidebarClicked = this.state.savedQuery && this.props.location.search === '';
@@ -69,6 +71,8 @@ class HomepageQueryAPI extends DeprecatedAsyncComponent<Props, HomepageQueryStat
               start: normalizeDateTimeString(start),
               end: normalizeDateTimeString(end),
             };
+          } else if (pinnedFilter === 'environments') {
+            query.environment = pageFilterState.state.environment;
           } else {
             query[pinnedFilter] = pageFilterState.state[pinnedFilter];
           }
@@ -77,7 +81,10 @@ class HomepageQueryAPI extends DeprecatedAsyncComponent<Props, HomepageQueryStat
 
       browserHistory.replace({
         ...this.props.location,
-        query,
+        query: {
+          ...query,
+          queryDataset: this.state.savedQuery?.queryDataset,
+        },
       });
     }
   }
@@ -95,19 +102,36 @@ class HomepageQueryAPI extends DeprecatedAsyncComponent<Props, HomepageQueryStat
     return endpoints;
   }
 
-  onRequestSuccess({stateKey, data}) {
+  onRequestSuccess({stateKey, data}: any) {
+    const {organization} = this.props;
     // No homepage query results in a 204, returning an empty string
     if (stateKey === 'savedQuery' && data === '') {
       this.setState({savedQuery: null});
+      return;
+    }
+    if (stateKey === 'savedQuery') {
+      this.setState({
+        savedQuery: organization.features.includes(
+          'performance-discover-dataset-selector'
+        )
+          ? getSavedQueryWithDataset(data)
+          : data,
+      });
     }
   }
 
   setSavedQuery = (newSavedQuery?: SavedQuery) => {
-    this.setState({savedQuery: newSavedQuery});
+    const {organization} = this.props;
+    this.setState({
+      savedQuery: organization.features.includes('performance-discover-dataset-selector')
+        ? (getSavedQueryWithDataset(newSavedQuery) as SavedQuery)
+        : newSavedQuery,
+    });
   };
 
   renderBody(): React.ReactNode {
     const {savedQuery, loading} = this.state;
+
     return (
       <Results
         {...this.props}

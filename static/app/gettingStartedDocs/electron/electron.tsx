@@ -1,16 +1,28 @@
 import ExternalLink from 'sentry/components/links/externalLink';
+import crashReportCallout from 'sentry/components/onboarding/gettingStartedDoc/feedback/crashReportCallout';
+import widgetCallout from 'sentry/components/onboarding/gettingStartedDoc/feedback/widgetCallout';
+import TracePropagationMessage from 'sentry/components/onboarding/gettingStartedDoc/replay/tracePropagationMessage';
 import {StepType} from 'sentry/components/onboarding/gettingStartedDoc/step';
 import type {
   Docs,
   DocsParams,
   OnboardingConfig,
 } from 'sentry/components/onboarding/gettingStartedDoc/types';
+import {getUploadSourceMapsStep} from 'sentry/components/onboarding/gettingStartedDoc/utils';
+import {
+  getCrashReportModalConfigDescription,
+  getCrashReportModalInstallDescriptionJavaScript,
+  getCrashReportModalIntroduction,
+  getFeedbackConfigureDescription,
+  getFeedbackSDKSetupSnippet,
+} from 'sentry/components/onboarding/gettingStartedDoc/utils/feedbackOnboarding';
+import exampleSnippets from 'sentry/components/onboarding/gettingStartedDoc/utils/metricsExampleSnippets';
+import {metricTagsExplanation} from 'sentry/components/onboarding/gettingStartedDoc/utils/metricsOnboarding';
 import {
   getReplayConfigureDescription,
   getReplaySDKSetupSnippet,
-  getUploadSourceMapsStep,
-} from 'sentry/components/onboarding/gettingStartedDoc/utils';
-import {tracePropagationMessage} from 'sentry/components/replaysOnboarding/utils';
+  getReplayVerifyStep,
+} from 'sentry/components/onboarding/gettingStartedDoc/utils/replayOnboarding';
 import {t, tct} from 'sentry/locale';
 
 type Params = DocsParams;
@@ -19,7 +31,7 @@ const getConfigureSnippet = (params: Params) => `
 import * as Sentry from "@sentry/electron";
 
 Sentry.init({
-  dsn: "${params.dsn}",
+  dsn: "${params.dsn.public}",
 });`;
 
 const getMetricsConfigureSnippet = (params: Params) => `
@@ -27,15 +39,12 @@ import * as Sentry from '@sentry/electron/main';
 
 // main process init
 Sentry.init({
-  dsn: "${params.dsn}",
-  _experiments: {
-    metricsAggregator: true,
-  },
+  dsn: "${params.dsn.public}",
+  // Only needed for SDK versions < 8.0.0
+  // _experiments: {
+  //   metricsAggregator: true,
+  // },
 });`;
-
-const getMetricsVerifySnippet = () => `
-// Add 4 to a counter named 'hits'
-Sentry.metrics.increment('hits', 4);`;
 
 const getInstallConfig = () => [
   {
@@ -68,12 +77,10 @@ const onboarding: OnboardingConfig = {
     {
       type: StepType.CONFIGURE,
       description: tct(
-        `You need to call [codeInit:Sentry.init] in the [codeMain:main] process and in every [codeRenderer:renderer] process you spawn.
+        `You need to call [code:Sentry.init] in the [code:main] process and in every [code:renderer] process you spawn.
            For more details about configuring the Electron SDK [docsLink:click here].`,
         {
-          codeInit: <code />,
-          codeMain: <code />,
-          codeRenderer: <code />,
+          code: <code />,
           docsLink: (
             <ExternalLink href="https://docs.sentry.io/platforms/javascript/guides/electron/" />
           ),
@@ -148,19 +155,19 @@ const replayOnboarding: OnboardingConfig = {
               value: 'javascript',
               language: 'javascript',
               code: getReplaySDKSetupSnippet({
-                importStatement: `import * as Sentry from "@sentry/electron";`,
-                dsn: params.dsn,
+                importStatement: `import * as Sentry from "@sentry/electron/renderer";`,
+                dsn: params.dsn.public,
                 mask: params.replayOptions?.mask,
                 block: params.replayOptions?.block,
               }),
             },
           ],
-          additionalInfo: tracePropagationMessage,
+          additionalInfo: <TracePropagationMessage />,
         },
       ],
     },
   ],
-  verify: () => [],
+  verify: getReplayVerifyStep(),
   nextSteps: () => [],
 };
 
@@ -169,10 +176,9 @@ const customMetricsOnboarding: OnboardingConfig = {
     {
       type: StepType.INSTALL,
       description: tct(
-        'You need a minimum version [codeVersion:4.17.0] of [codePackage:@sentry/electron].',
+        'You need a minimum version [code:4.17.0] of [code:@sentry/electron].',
         {
-          codeVersion: <code />,
-          codePackage: <code />,
+          code: <code />,
         }
       ),
       configurations: getInstallConfig(),
@@ -181,23 +187,13 @@ const customMetricsOnboarding: OnboardingConfig = {
   configure: params => [
     {
       type: StepType.CONFIGURE,
-      description: tct(
-        'To enable capturing metrics, you first need to add the [codeIntegration:metricsAggregator] experiment to your [codeNamespace:Sentry.init] call in your main process.',
-        {
-          codeIntegration: <code />,
-          codeNamespace: <code />,
-        }
+      description: t(
+        'With the default snippet in place, there is no need for any further configuration.'
       ),
       configurations: [
         {
-          code: [
-            {
-              label: 'JavaScript',
-              value: 'javascript',
-              language: 'javascript',
-              code: getMetricsConfigureSnippet(params),
-            },
-          ],
+          code: getMetricsConfigureSnippet(params),
+          language: 'javascript',
         },
       ],
     },
@@ -206,29 +202,47 @@ const customMetricsOnboarding: OnboardingConfig = {
     {
       type: StepType.VERIFY,
       description: tct(
-        "Then you'll be able to add metrics as [codeCounters:counters], [codeSets:sets], [codeDistribution:distributions], and [codeGauge:gauges]. These are available under the [codeNamespace:Sentry.metrics] namespace. This API is available in both renderer and main processes. Try out this example:",
+        "Then you'll be able to add metrics as [code:counters], [code:sets], [code:distributions], and [code:gauges]. These are available under the [code:Sentry.metrics] namespace. This API is available in both renderer and main processes.",
         {
-          codeCounters: <code />,
-          codeSets: <code />,
-          codeDistribution: <code />,
-          codeGauge: <code />,
-          codeNamespace: <code />,
+          code: <code />,
         }
       ),
       configurations: [
         {
+          description: metricTagsExplanation,
+        },
+        {
+          description: t('Try out these examples:'),
           code: [
             {
-              label: 'JavaScript',
-              value: 'javascript',
+              label: 'Counter',
+              value: 'counter',
               language: 'javascript',
-              code: getMetricsVerifySnippet(),
+              code: exampleSnippets.javascript.counter,
+            },
+            {
+              label: 'Distribution',
+              value: 'distribution',
+              language: 'javascript',
+              code: exampleSnippets.javascript.distribution,
+            },
+            {
+              label: 'Set',
+              value: 'set',
+              language: 'javascript',
+              code: exampleSnippets.javascript.set,
+            },
+            {
+              label: 'Gauge',
+              value: 'gauge',
+              language: 'javascript',
+              code: exampleSnippets.javascript.gauge,
             },
           ],
         },
         {
           description: t(
-            'With a bit of delay you can see the data appear in the Sentry UI.'
+            'It can take up to 3 minutes for the data to appear in the Sentry UI.'
           ),
         },
         {
@@ -246,10 +260,106 @@ const customMetricsOnboarding: OnboardingConfig = {
   ],
 };
 
+const feedbackOnboarding: OnboardingConfig = {
+  install: () => [
+    {
+      type: StepType.INSTALL,
+      description: tct(
+        'For the User Feedback integration to work, you must have the Sentry browser SDK package, or an equivalent framework SDK (e.g. [code:@sentry/electron]) installed, minimum version 7.85.0.',
+        {
+          code: <code />,
+        }
+      ),
+      configurations: getInstallConfig(),
+    },
+  ],
+  configure: (params: Params) => [
+    {
+      type: StepType.CONFIGURE,
+      description: getFeedbackConfigureDescription({
+        linkConfig:
+          'https://docs.sentry.io/platforms/javascript/guides/electron/user-feedback/configuration/',
+        linkButton:
+          'https://docs.sentry.io/platforms/javascript/guides/electron/user-feedback/configuration/#bring-your-own-button',
+      }),
+      configurations: [
+        {
+          code: [
+            {
+              label: 'JavaScript',
+              value: 'javascript',
+              language: 'javascript',
+              code: getFeedbackSDKSetupSnippet({
+                importStatement: `import * as Sentry from "@sentry/electron/renderer";`,
+                dsn: params.dsn.public,
+                feedbackOptions: params.feedbackOptions,
+              }),
+            },
+          ],
+        },
+      ],
+      additionalInfo: crashReportCallout({
+        link: 'https://docs.sentry.io/platforms/javascript/guides/electron/user-feedback/#crash-report-modal',
+      }),
+    },
+  ],
+  verify: () => [],
+  nextSteps: () => [],
+};
+
+const crashReportOnboarding: OnboardingConfig = {
+  introduction: () => getCrashReportModalIntroduction(),
+  install: (params: Params) => [
+    {
+      type: StepType.INSTALL,
+      description: getCrashReportModalInstallDescriptionJavaScript(),
+      configurations: [
+        {
+          code: [
+            {
+              label: 'JavaScript',
+              value: 'javascript',
+              language: 'javascript',
+              code: `const { init, showReportDialog } = require("@sentry/electron");
+
+init({
+  dsn: "${params.dsn.public}",
+  beforeSend(event) {
+    // Check if it is an exception, if so, show the report dialog
+    // Note that this only will work in the renderer process, it's a noop on the main process
+    if (event.exception && event.event_id) {
+      showReportDialog({ eventId: event_id });
+    }
+    return event;
+  },
+});`,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  configure: () => [
+    {
+      type: StepType.CONFIGURE,
+      description: getCrashReportModalConfigDescription({
+        link: 'https://docs.sentry.io/platforms/javascript/guides/electron/user-feedback/configuration/#crash-report-modal',
+      }),
+      additionalInfo: widgetCallout({
+        link: 'https://docs.sentry.io/platforms/javascript/guides/electron/user-feedback/#user-feedback-widget',
+      }),
+    },
+  ],
+  verify: () => [],
+  nextSteps: () => [],
+};
+
 const docs: Docs = {
   onboarding,
-  replayOnboardingNpm: replayOnboarding,
+  feedbackOnboardingNpm: feedbackOnboarding,
+  replayOnboarding,
   customMetricsOnboarding,
+  crashReportOnboarding,
 };
 
 export default docs;

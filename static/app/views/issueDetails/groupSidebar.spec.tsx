@@ -14,7 +14,7 @@ import {
 } from 'sentry-test/reactTestingLibrary';
 
 import MemberListStore from 'sentry/stores/memberListStore';
-import type {TeamParticipant, UserParticipant} from 'sentry/types';
+import type {TeamParticipant, UserParticipant} from 'sentry/types/group';
 
 import GroupSidebar from './groupSidebar';
 
@@ -238,7 +238,7 @@ describe('GroupSidebar', function () {
     expect(screen.queryByText('#team-slug')).not.toBeInTheDocument();
 
     await userEvent.click(
-      screen.getAllByRole('button', {name: 'Expand Participants'})[0]
+      screen.getAllByRole('button', {name: 'Expand Participants'})[0]!
     );
 
     await waitFor(() => expect(screen.getByText('#team-slug')).toBeVisible());
@@ -259,10 +259,7 @@ describe('GroupSidebar', function () {
         <GroupSidebar
           group={group}
           project={{...project, platform: 'react-native'}}
-          organization={{
-            ...organization,
-            features: [...organization.features, 'issue-details-tag-improvements'],
-          }}
+          organization={organization}
           event={EventFixture()}
           environments={[environment]}
         />
@@ -278,10 +275,7 @@ describe('GroupSidebar', function () {
         <GroupSidebar
           group={group}
           project={project}
-          organization={{
-            ...organization,
-            features: [...organization.features, 'issue-details-tag-improvements'],
-          }}
+          organization={organization}
           event={EventFixture()}
           environments={[environment]}
         />

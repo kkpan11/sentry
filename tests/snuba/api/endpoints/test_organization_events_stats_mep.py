@@ -7,17 +7,19 @@ from unittest import mock
 import pytest
 from django.urls import reverse
 
+from sentry.discover.models import DatasetSourcesTypes
+from sentry.models.dashboard_widget import DashboardWidget, DashboardWidgetTypes
 from sentry.models.environment import Environment
 from sentry.sentry_metrics.use_case_id_registry import UseCaseID
 from sentry.snuba.metrics.extraction import MetricSpecType, OnDemandMetricSpec
 from sentry.testutils.cases import MetricsEnhancedPerformanceTestCase
-from sentry.testutils.helpers.datetime import before_now, iso_format
-from sentry.testutils.silo import region_silo_test
+from sentry.testutils.helpers.datetime import before_now
+from sentry.testutils.helpers.on_demand import create_widget
+from sentry.utils.samples import load_data
 
 pytestmark = pytest.mark.sentry_metrics
 
 
-@region_silo_test
 class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
     MetricsEnhancedPerformanceTestCase
 ):
@@ -35,7 +37,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
 
         self.url = reverse(
             "sentry-api-0-organization-events-stats",
-            kwargs={"organization_slug": self.project.organization.slug},
+            kwargs={"organization_id_or_slug": self.project.organization.slug},
         )
         self.features = {
             "organizations:performance-use-metrics": True,
@@ -44,6 +46,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         self.additional_params = dict()
 
     # These throughput tests should roughly match the ones in OrganizationEventsStatsEndpointTest
+    @pytest.mark.querybuilder
     def test_throughput_epm_hour_rollup(self):
         # Each of these denotes how many events to create in each hour
         event_counts = [6, 0, 6, 3, 0, 3]
@@ -56,8 +59,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         for axis in ["epm()", "tpm()"]:
             response = self.do_request(
                 data={
-                    "start": iso_format(self.day_ago),
-                    "end": iso_format(self.day_ago + timedelta(hours=6)),
+                    "start": self.day_ago,
+                    "end": self.day_ago + timedelta(hours=6),
                     "interval": "1h",
                     "yAxis": axis,
                     "project": self.project.id,
@@ -74,6 +77,39 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
             for test in zip(event_counts, rows):
                 assert test[1][1][0]["count"] == test[0] / (3600.0 / 60.0)
 
+    @pytest.mark.querybuilder
+    def test_throughput_spm_hour_rollup(self):
+        # Each of these denotes how many events to create in each hour
+        event_counts = [6, 0, 6, 3, 0, 3]
+        for hour, count in enumerate(event_counts):
+            for minute in range(count):
+                self.store_span_metric(
+                    1,
+                    timestamp=self.day_ago + timedelta(hours=hour, minutes=minute),
+                )
+
+        response = self.do_request(
+            data={
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
+                "interval": "1h",
+                "yAxis": "spm()",
+                "project": self.project.id,
+                "dataset": "metrics",
+                **self.additional_params,
+            },
+        )
+
+        assert response.status_code == 200, response.content
+        data = response.data["data"]
+        assert len(data) == 6
+        assert response.data["meta"]["dataset"] == "metrics"
+
+        rows = data[0:6]
+
+        for test in zip(event_counts, rows):
+            assert test[1][1][0]["count"] == test[0] / (3600.0 / 60.0)
+
     def test_throughput_epm_day_rollup(self):
         # Each of these denotes how many events to create in each minute
         event_counts = [6, 0, 6, 3, 0, 3]
@@ -86,8 +122,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         for axis in ["epm()", "tpm()"]:
             response = self.do_request(
                 data={
-                    "start": iso_format(self.day_ago),
-                    "end": iso_format(self.day_ago + timedelta(hours=24)),
+                    "start": self.day_ago,
+                    "end": self.day_ago + timedelta(hours=24),
                     "interval": "24h",
                     "yAxis": axis,
                     "project": self.project.id,
@@ -114,8 +150,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         for axis in ["tpm()", "epm()"]:
             response = self.do_request(
                 data={
-                    "start": iso_format(self.day_ago + timedelta(minutes=30)),
-                    "end": iso_format(self.day_ago + timedelta(hours=6, minutes=30)),
+                    "start": self.day_ago + timedelta(minutes=30),
+                    "end": self.day_ago + timedelta(hours=6, minutes=30),
                     "interval": "1h",
                     "yAxis": axis,
                     "project": self.project.id,
@@ -144,8 +180,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         for axis in ["eps()", "tps()"]:
             response = self.do_request(
                 data={
-                    "start": iso_format(self.day_ago),
-                    "end": iso_format(self.day_ago + timedelta(minutes=6)),
+                    "start": self.day_ago,
+                    "end": self.day_ago + timedelta(minutes=6),
                     "interval": "1m",
                     "yAxis": axis,
                     "project": self.project.id,
@@ -173,8 +209,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": ["failure_rate()"],
                 "project": self.project.id,
@@ -203,8 +239,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": ["p75(measurements.lcp)", "p75(transaction.duration)"],
                 "project": self.project.id,
@@ -229,8 +265,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": ["epm()", "eps()", "tpm()", "p50(transaction.duration)"],
                 "dataset": "metricsEnhanced",
@@ -249,8 +285,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "count_unique(user)",
                 "dataset": "metricsEnhanced",
@@ -268,8 +304,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
             response = self.do_request(
                 data={
                     "project": self.project.id,
-                    "start": iso_format(self.day_ago),
-                    "end": iso_format(self.day_ago + timedelta(hours=2)),
+                    "start": self.day_ago,
+                    "end": self.day_ago + timedelta(hours=2),
                     "interval": "1h",
                     "query": query,
                     "yAxis": ["epm()"],
@@ -296,8 +332,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "query": "p95():<5s",
                 "yAxis": ["epm()"],
@@ -315,8 +351,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 # Should be a mep able query
                 "query": "",
@@ -336,8 +372,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         self.store_transaction_metric(789, timestamp=self.day_ago + timedelta(hours=1, minutes=30))
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "sum(transaction.duration)",
                 "dataset": "metricsEnhanced",
@@ -368,8 +404,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         self.store_transaction_metric(456, timestamp=self.day_ago + timedelta(minutes=30))
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(days=1)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(days=1),
                 "interval": "1d",
                 "yAxis": "sum(transaction.duration)",
                 "comparisonDelta": 86400,
@@ -417,8 +453,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "sum(measurements.datacenter_memory)",
                 "dataset": "metricsEnhanced",
@@ -445,8 +481,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "p99(measurements.custom)",
                 "dataset": "metricsEnhanced",
@@ -487,8 +523,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": [
                     "sum(measurements.datacenter_memory)",
@@ -544,8 +580,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         self.store_transaction_metric(789, timestamp=self.day_ago + timedelta(hours=1, minutes=30))
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "query": "transaction.duration:<5s",
                 "yAxis": "sum(transaction.duration)",
@@ -563,8 +599,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "query": "title:foo_transaction",
                 "yAxis": [
@@ -589,8 +625,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "query": "transaction.status:unknown_error",
                 "yAxis": [
@@ -616,8 +652,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "p99(measurements.custom)",
                 "query": "",
@@ -645,8 +681,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         )
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": [
                     "p95(measurements.custom)",
@@ -681,8 +717,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
             data={
                 # make sure to query the project with 0 events
                 "project": project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "yAxis": "count()",
                 "orderby": ["-count()"],
@@ -713,8 +749,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
             data={
                 # make sure to query the project with 0 events
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "interval": "1h",
                 "yAxis": "p75(transaction.duration)",
                 "orderby": ["-p75(transaction.duration)"],
@@ -742,8 +778,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
             data={
                 # make sure to query the project with 0 events
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "interval": "1h",
                 "yAxis": "p75(transaction.duration)",
                 "orderby": ["-p75(transaction.duration)"],
@@ -758,8 +794,249 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest(
         data = response.data[f"{self.project.slug}"]
         assert data["order"] == 0
 
+    def test_split_decision_for_errors_widget(self):
+        error_data = load_data("python", timestamp=before_now(minutes=1))
+        self.store_event(
+            data={
+                **error_data,
+                "exception": {"values": [{"type": "blah", "data": {"values": []}}]},
+            },
+            project_id=self.project.id,
+        )
+        _, widget, __ = create_widget(
+            ["count()", "error.type"], "error.type:blah", self.project, discover_widget_split=None
+        )
 
-@region_silo_test
+        response = self.do_request(
+            {
+                "field": ["count()", "error.type"],
+                "query": "error.type:blah",
+                "dataset": "metricsEnhanced",
+                "per_page": 50,
+                "dashboardWidgetId": widget.id,
+            }
+        )
+
+        assert response.status_code == 200, response.content
+        assert response.data.get("meta").get(
+            "discoverSplitDecision"
+        ) is DashboardWidgetTypes.get_type_name(DashboardWidgetTypes.ERROR_EVENTS)
+
+        widget.refresh_from_db()
+        assert widget.discover_widget_split == DashboardWidgetTypes.ERROR_EVENTS
+        assert widget.dataset_source == DatasetSourcesTypes.INFERRED.value
+
+    def test_split_decision_for_transactions_widget(self):
+        self.store_transaction_metric(
+            100,
+            timestamp=self.day_ago + timedelta(hours=1, minutes=30),
+        )
+        _, widget, __ = create_widget(
+            ["count()", "transaction.name"], "", self.project, discover_widget_split=None
+        )
+
+        assert widget.discover_widget_split is None
+
+        response = self.do_request(
+            {
+                "field": ["count()", "transaction.name"],
+                "query": "",
+                "dataset": "metricsEnhanced",
+                "per_page": 50,
+                "dashboardWidgetId": widget.id,
+            }
+        )
+
+        assert response.status_code == 200, response.content
+        assert response.data.get("meta").get(
+            "discoverSplitDecision"
+        ) is DashboardWidgetTypes.get_type_name(DashboardWidgetTypes.TRANSACTION_LIKE)
+
+        widget.refresh_from_db()
+        assert widget.discover_widget_split == DashboardWidgetTypes.TRANSACTION_LIKE
+        assert widget.dataset_source == DatasetSourcesTypes.INFERRED.value
+
+    def test_split_decision_for_top_events_errors_widget(self):
+        error_data = load_data("python", timestamp=before_now(minutes=1))
+        self.store_event(
+            data={
+                **error_data,
+                "exception": {"values": [{"type": "test_error", "data": {"values": []}}]},
+            },
+            project_id=self.project.id,
+        )
+        _, widget, __ = create_widget(
+            ["count()", "error.type"],
+            "error.type:test_error",
+            self.project,
+            discover_widget_split=None,
+        )
+
+        response = self.do_request(
+            {
+                "field": ["count()", "error.type"],
+                "query": "error.type:test_error",
+                "dataset": "metricsEnhanced",
+                "per_page": 50,
+                "dashboardWidgetId": widget.id,
+                "topEvents": 5,
+            }
+        )
+
+        assert response.status_code == 200, response.content
+
+        # Only a singular result for the test_error event
+        assert len(response.data) == 1
+
+        # Results are grouped by the error type
+        assert response.data.get("test_error").get("meta").get(
+            "discoverSplitDecision"
+        ) is DashboardWidgetTypes.get_type_name(DashboardWidgetTypes.ERROR_EVENTS)
+
+        widget.refresh_from_db()
+        assert widget.discover_widget_split == DashboardWidgetTypes.ERROR_EVENTS
+        assert widget.dataset_source == DatasetSourcesTypes.INFERRED.value
+
+    def test_split_decision_for_top_events_transactions_widget(self):
+        self.store_transaction_metric(
+            100,
+            timestamp=self.day_ago + timedelta(hours=1, minutes=30),
+            tags={"transaction": "foo_transaction"},
+        )
+        _, widget, __ = create_widget(
+            ["count()", "transaction"], "", self.project, discover_widget_split=None
+        )
+
+        assert widget.discover_widget_split is None
+
+        response = self.do_request(
+            {
+                "field": ["count()", "transaction"],
+                "query": "",
+                "dataset": "metricsEnhanced",
+                "per_page": 50,
+                "dashboardWidgetId": widget.id,
+                "topEvents": 5,
+            }
+        )
+
+        assert response.status_code == 200, response.content
+
+        # Only a singular result for the transaction
+        assert len(response.data) == 1
+
+        # Results are grouped by the transaction
+        assert response.data.get("foo_transaction").get("meta").get(
+            "discoverSplitDecision"
+        ) is DashboardWidgetTypes.get_type_name(DashboardWidgetTypes.TRANSACTION_LIKE)
+
+        widget.refresh_from_db()
+        assert widget.discover_widget_split == DashboardWidgetTypes.TRANSACTION_LIKE
+        assert widget.dataset_source == DatasetSourcesTypes.INFERRED.value
+
+    def test_split_decision_for_ambiguous_widget_without_data(self):
+        _, widget, __ = create_widget(
+            ["count()", "transaction.name", "error.type"],
+            "",
+            self.project,
+            discover_widget_split=None,
+        )
+        assert widget.discover_widget_split is None
+
+        response = self.do_request(
+            {
+                "field": ["count()", "transaction.name", "error.type"],
+                "query": "",
+                "dataset": "metricsEnhanced",
+                "per_page": 50,
+                "dashboardWidgetId": widget.id,
+            },
+            features={"organizations:performance-discover-dataset-selector": True},
+        )
+
+        assert response.status_code == 200, response.content
+        assert response.data.get("meta").get(
+            "discoverSplitDecision"
+        ) == DashboardWidgetTypes.get_type_name(DashboardWidgetTypes.ERROR_EVENTS)
+
+        widget.refresh_from_db()
+        assert widget.discover_widget_split == DashboardWidgetTypes.ERROR_EVENTS
+        assert widget.dataset_source == DatasetSourcesTypes.FORCED.value
+
+    def test_inp_percentile(self):
+        for hour in range(6):
+            timestamp = self.day_ago + timedelta(hours=hour, minutes=30)
+            self.store_transaction_metric(
+                111,
+                metric="measurements.inp",
+                timestamp=timestamp,
+                use_case_id=UseCaseID.TRANSACTIONS,
+            )
+
+        response = self.do_request(
+            data={
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
+                "interval": "1h",
+                "yAxis": ["p75(measurements.inp)"],
+                "project": self.project.id,
+                "dataset": "metrics",
+                **self.additional_params,
+            },
+        )
+        assert response.status_code == 200, response.content
+        data = response.data
+        assert len(data["data"]) == 6
+        assert data["isMetricsData"]
+        assert data["meta"]["fields"]["p75_measurements_inp"] == "duration"
+        for item in data["data"]:
+            assert item[1][0]["count"] == 111
+
+    def test_metrics_enhanced_defaults_to_transactions_with_feature_flag(self):
+        # Store an error
+        self.store_event(
+            data={
+                "event_id": "a" * 32,
+                "message": "poof",
+                "user": {"email": self.user.email},
+                "timestamp": before_now(days=1, minutes=1).isoformat(),
+                "tags": {"notMetrics": "this makes it not metrics"},
+            },
+            project_id=self.project.id,
+        )
+
+        # Store a transaction
+        transaction_data = load_data("transaction")
+        self.store_event(
+            {
+                **transaction_data,
+                "tags": {"notMetrics": "this makes it not metrics"},
+                "start_timestamp": before_now(days=1, minutes=1).isoformat(),
+                "timestamp": before_now(days=1).isoformat(),
+            },
+            project_id=self.project.id,
+        )
+        features = {
+            "organizations:performance-discover-dataset-selector": True,
+            "organizations:discover-basic": True,
+            "organizations:global-views": True,
+        }
+        query = {
+            "field": ["count()"],
+            "query": 'notMetrics:"this makes it not metrics"',
+            "statsPeriod": "1d",
+            "interval": "1d",
+            "dataset": "metricsEnhanced",
+        }
+        response = self.do_request(query, features=features)
+
+        assert response.status_code == 200, response.content
+        assert len(response.data["data"]) == 2
+
+        # First bucket, where the transaction should be
+        assert response.data["data"][0][1][0]["count"] == 1
+
+
 class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLayer(
     OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTest
 ):
@@ -782,8 +1059,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1m",
                 "yAxis": [f"sum({mri})"],
                 "project": self.project.id,
@@ -795,7 +1072,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
         assert response.status_code == 200, response.content
         data = response.data["data"]
         for (_, value), expected_value in zip(data, [10, 20, 30, 40, 50, 60]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
     def test_counter_custom_metric(self):
         mri = "c:custom/sentry.process_profile.track_outcome@second"
@@ -811,8 +1088,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": [f"sum({mri})"],
                 "project": self.project.id,
@@ -824,7 +1101,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
         assert response.status_code == 200, response.content
         data = response.data["data"]
         for (_, value), expected_value in zip(data, [10, 20, 30, 40, 50, 60]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
     def test_distribution_custom_metric(self):
         mri = "d:custom/sentry.process_profile.track_outcome@second"
@@ -841,8 +1118,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": [f"min({mri})", f"max({mri})", f"p90({mri})"],
                 "project": self.project.id,
@@ -855,15 +1132,15 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
         data = response.data
         min = data[f"min({mri})"]["data"]
         for (_, value), expected_value in zip(min, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         max = data[f"max({mri})"]["data"]
         for (_, value), expected_value in zip(max, [30.0, 60.0, 90.0, 120.0, 150.0, 180.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         p90 = data[f"p90({mri})"]["data"]
         for (_, value), expected_value in zip(p90, [28.0, 56.0, 84.0, 112.0, 140.0, 168.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
     def test_set_custom_metric(self):
         mri = "s:custom/sentry.process_profile.track_outcome@second"
@@ -881,8 +1158,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": [f"count_unique({mri})"],
                 "project": self.project.id,
@@ -894,7 +1171,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
         assert response.status_code == 200, response.content
         data = response.data["data"]
         for (_, value), expected_value in zip(data, [1, 1, 1, 1, 1, 1]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
     def test_gauge_custom_metric(self):
         mri = "g:custom/sentry.process_profile.track_outcome@second"
@@ -913,8 +1190,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
 
         response = self.do_request(
             data={
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=6)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
                 "interval": "1h",
                 "yAxis": [
                     f"min({mri})",
@@ -933,26 +1210,57 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithMetricLay
         data = response.data
         min = data[f"min({mri})"]["data"]
         for (_, value), expected_value in zip(min, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         max = data[f"max({mri})"]["data"]
         for (_, value), expected_value in zip(max, [30.0, 60.0, 90.0, 120.0, 150.0, 180.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         last = data[f"last({mri})"]["data"]
         for (_, value), expected_value in zip(last, [30.0, 60.0, 90.0, 120.0, 150.0, 180.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         sum = data[f"sum({mri})"]["data"]
         for (_, value), expected_value in zip(sum, [40.0, 80.0, 120.0, 160.0, 200.0, 240.0]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
 
         count = data[f"count({mri})"]["data"]
         for (_, value), expected_value in zip(count, [40, 80, 120, 160, 200, 240]):
-            assert value[0]["count"] == expected_value  # type:ignore
+            assert value[0]["count"] == expected_value  # type: ignore[index]
+
+    @pytest.mark.querybuilder
+    def test_throughput_spm_hour_rollup(self):
+        # Each of these denotes how many events to create in each hour
+        event_counts = [6, 0, 6, 3, 0, 3]
+        for hour, count in enumerate(event_counts):
+            for minute in range(count):
+                self.store_span_metric(
+                    1,
+                    timestamp=self.day_ago + timedelta(hours=hour, minutes=minute),
+                )
+
+        response = self.do_request(
+            data={
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=6),
+                "interval": "1h",
+                "yAxis": "spm()",
+                "project": self.project.id,
+                "dataset": "metrics",
+            },
+        )
+
+        assert response.status_code == 200, response.content
+        data = response.data["data"]
+        assert len(data) == 6
+        assert response.data["meta"]["dataset"] == "metrics"
+
+        rows = data[0:6]
+
+        for test in zip(event_counts, rows):
+            assert test[1][1][0]["count"] == test[0] / (3600.0 / 60.0)
 
 
-@region_silo_test
 class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandWidgets(
     MetricsEnhancedPerformanceTestCase
 ):
@@ -967,7 +1275,7 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
 
         self.url = reverse(
             "sentry-api-0-organization-events-stats",
-            kwargs={"organization_slug": self.project.organization.slug},
+            kwargs={"organization_id_or_slug": self.project.organization.slug},
         )
         self.features = {
             "organizations:on-demand-metrics-extraction-widgets": True,
@@ -980,8 +1288,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": ["-count()"],
                 "environment": "production",
@@ -1005,8 +1313,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": ["-count()"],
                 "environment": "production",
@@ -1062,8 +1370,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": ["-count()"],
                 "environment": "production",
@@ -1138,8 +1446,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": ["-count()"],
                 "query": query,
@@ -1156,6 +1464,323 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
                 "onDemandType": "dynamic_query",
             },
         )
+
+        assert response.status_code == 200, response.content
+
+        groups = [
+            ("foo,red", "count()", 0.0, 1488.0),
+            ("foo,red", "count_web_vitals(measurements.lcp, good)", 0.0, 0.0),
+            ("bar,blue", "count()", 0.0, 0.0),
+            ("bar,blue", "count_web_vitals(measurements.lcp, good)", 0.0, 1440.0),
+        ]
+        assert len(response.data.keys()) == 2
+        for group_count in groups:
+            group, agg, row1, row2 = group_count
+            row_data = response.data[group][agg]["data"][:2]
+            assert [attrs for time, attrs in row_data] == [[{"count": row1}], [{"count": row2}]]
+
+            assert response.data[group][agg]["meta"]["isMetricsExtractedData"]
+            assert response.data[group]["isMetricsExtractedData"]
+
+    def test_top_events_with_transaction_on_demand_passing_widget_id_unsaved_transaction_only(self):
+        field = "count()"
+        field_two = "count_web_vitals(measurements.lcp, good)"
+        groupbys = ["customtag1", "customtag2"]
+        query = "transaction.duration:>=100"
+        spec = OnDemandMetricSpec(
+            field=field, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+        spec_two = OnDemandMetricSpec(
+            field=field_two, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+
+        _, widget, __ = create_widget(
+            ["count()"],
+            "",
+            self.project,
+            discover_widget_split=None,
+        )
+
+        for hour in range(0, 2):
+            self.store_on_demand_metric(
+                hour * 62 * 24,
+                spec=spec,
+                additional_tags={
+                    "customtag1": "foo",
+                    "customtag2": "red",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+            self.store_on_demand_metric(
+                hour * 60 * 24,
+                spec=spec_two,
+                additional_tags={
+                    "customtag1": "bar",
+                    "customtag2": "blue",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+
+        yAxis = [field, field_two]
+
+        response = self.do_request(
+            data={
+                "project": self.project.id,
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
+                "interval": "1h",
+                "orderby": ["-count()"],
+                "query": query,
+                "yAxis": yAxis,
+                "field": yAxis + groupbys,
+                "topEvents": 5,
+                "dataset": "metricsEnhanced",
+                "useOnDemandMetrics": "true",
+                "onDemandType": "dynamic_query",
+                "dashboardWidgetId": widget.id,
+            },
+        )
+        saved_widget = DashboardWidget.objects.get(id=widget.id)
+        assert saved_widget.discover_widget_split == DashboardWidgetTypes.TRANSACTION_LIKE
+
+        assert response.status_code == 200, response.content
+        # Fell back to discover data which is empty for this test (empty group of '').
+        assert len(response.data.keys()) == 2
+        assert bool(response.data["foo,red"])
+        assert bool(response.data["bar,blue"])
+
+    def test_top_events_with_transaction_on_demand_passing_widget_id_unsaved_error(
+        self,
+    ):
+        self.project = self.create_project(organization=self.organization)
+        Environment.get_or_create(self.project, "production")
+        field = "count()"
+        field_two = "count()"
+        groupbys = ["customtag1", "customtag2"]
+        query = "query.dataset:foo"
+
+        _, widget, __ = create_widget(
+            ["count()"],
+            "",
+            self.project,
+            discover_widget_split=None,
+        )
+
+        self.store_event(
+            data={
+                "event_id": "a" * 32,
+                "message": "very bad",
+                "type": "error",
+                "start_timestamp": (self.day_ago + timedelta(hours=1)).isoformat(),
+                "timestamp": (self.day_ago + timedelta(hours=1)).isoformat(),
+                "tags": {"customtag1": "error_value", "query.dataset": "foo"},
+            },
+            project_id=self.project.id,
+        )
+        self.store_event(
+            data={
+                "event_id": "b" * 32,
+                "message": "very bad 2",
+                "type": "error",
+                "start_timestamp": (self.day_ago + timedelta(hours=1)).isoformat(),
+                "timestamp": (self.day_ago + timedelta(hours=1)).isoformat(),
+                "tags": {"customtag1": "error_value2", "query.dataset": "foo"},
+            },
+            project_id=self.project.id,
+        )
+
+        yAxis = ["count()"]
+
+        response = self.do_request(
+            data={
+                "project": self.project.id,
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
+                "interval": "1h",
+                "orderby": ["-count()"],
+                "query": query,
+                "yAxis": yAxis,
+                "field": [field, field_two] + groupbys,
+                "topEvents": 5,
+                "dataset": "metricsEnhanced",
+                "useOnDemandMetrics": "true",
+                "onDemandType": "dynamic_query",
+                "dashboardWidgetId": widget.id,
+            },
+        )
+        saved_widget = DashboardWidget.objects.get(id=widget.id)
+        assert saved_widget.discover_widget_split == DashboardWidgetTypes.ERROR_EVENTS
+
+        assert response.status_code == 200, response.content
+        # Fell back to discover data which is empty for this test (empty group of '').
+        assert len(response.data.keys()) == 2
+        assert bool(response.data["error_value,"])
+        assert bool(response.data["error_value2,"])
+
+    def test_top_events_with_transaction_on_demand_passing_widget_id_unsaved_discover(self):
+        self.project = self.create_project(organization=self.organization)
+        Environment.get_or_create(self.project, "production")
+        field = "count()"
+        field_two = "count()"
+        groupbys = ["customtag1", "customtag2"]
+        query = "query.dataset:foo"
+        spec = OnDemandMetricSpec(
+            field=field, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+        spec_two = OnDemandMetricSpec(
+            field=field_two, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+
+        _, widget, __ = create_widget(
+            ["count()"],
+            "",
+            self.project,
+            discover_widget_split=None,
+        )
+
+        self.store_event(
+            data={
+                "event_id": "a" * 32,
+                "message": "very bad",
+                "type": "error",
+                "timestamp": (self.day_ago + timedelta(hours=1)).isoformat(),
+                "tags": {"customtag1": "error_value", "query.dataset": "foo"},
+            },
+            project_id=self.project.id,
+        )
+
+        transaction = load_data("transaction")
+        transaction["timestamp"] = (self.day_ago + timedelta(hours=1)).isoformat()
+        transaction["start_timestamp"] = (self.day_ago + timedelta(hours=1)).isoformat()
+        transaction["tags"] = {"customtag1": "transaction_value", "query.dataset": "foo"}
+
+        self.store_event(
+            data=transaction,
+            project_id=self.project.id,
+        )
+
+        for hour in range(0, 5):
+            self.store_on_demand_metric(
+                hour * 62 * 24,
+                spec=spec,
+                additional_tags={
+                    "customtag1": "foo",
+                    "customtag2": "red",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+            self.store_on_demand_metric(
+                hour * 60 * 24,
+                spec=spec_two,
+                additional_tags={
+                    "customtag1": "bar",
+                    "customtag2": "blue",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+
+        yAxis = ["count()"]
+
+        response = self.do_request(
+            data={
+                "project": self.project.id,
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
+                "interval": "1h",
+                "orderby": ["-count()"],
+                "query": query,
+                "yAxis": yAxis,
+                "field": [field, field_two, "customtag1", "customtag2"],
+                "topEvents": 5,
+                "dataset": "metricsEnhanced",
+                "useOnDemandMetrics": "true",
+                "onDemandType": "dynamic_query",
+                "dashboardWidgetId": widget.id,
+            },
+        )
+
+        saved_widget = DashboardWidget.objects.get(id=widget.id)
+        assert saved_widget.discover_widget_split == DashboardWidgetTypes.DISCOVER
+
+        assert response.status_code == 200, response.content
+
+        assert response.status_code == 200, response.content
+        # Fell back to discover data which is empty for this test (empty group of '').
+        assert len(response.data.keys()) == 2
+        assert bool(response.data["error_value,"])
+        assert bool(response.data["transaction_value,"])
+
+    def test_top_events_with_transaction_on_demand_passing_widget_id_saved(self):
+        field = "count()"
+        field_two = "count_web_vitals(measurements.lcp, good)"
+        groupbys = ["customtag1", "customtag2"]
+        query = "transaction.duration:>=100"
+        spec = OnDemandMetricSpec(
+            field=field, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+        spec_two = OnDemandMetricSpec(
+            field=field_two, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+
+        _, widget, __ = create_widget(
+            ["count()"],
+            "",
+            self.project,
+            discover_widget_split=DashboardWidgetTypes.TRANSACTION_LIKE,  # Transactions like uses on-demand
+        )
+
+        for hour in range(0, 5):
+            self.store_on_demand_metric(
+                hour * 62 * 24,
+                spec=spec,
+                additional_tags={
+                    "customtag1": "foo",
+                    "customtag2": "red",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+            self.store_on_demand_metric(
+                hour * 60 * 24,
+                spec=spec_two,
+                additional_tags={
+                    "customtag1": "bar",
+                    "customtag2": "blue",
+                    "environment": "production",
+                },
+                timestamp=self.day_ago + timedelta(hours=hour),
+            )
+
+        yAxis = ["count()", "count_web_vitals(measurements.lcp, good)"]
+
+        with mock.patch.object(widget, "save") as mock_widget_save:
+            response = self.do_request(
+                data={
+                    "project": self.project.id,
+                    "start": self.day_ago,
+                    "end": self.day_ago + timedelta(hours=2),
+                    "interval": "1h",
+                    "orderby": ["-count()"],
+                    "query": query,
+                    "yAxis": yAxis,
+                    "field": [
+                        "count()",
+                        "count_web_vitals(measurements.lcp, good)",
+                        "customtag1",
+                        "customtag2",
+                    ],
+                    "topEvents": 5,
+                    "dataset": "metricsEnhanced",
+                    "useOnDemandMetrics": "true",
+                    "onDemandType": "dynamic_query",
+                    "dashboardWidgetId": widget.id,
+                },
+            )
+            assert bool(mock_widget_save.assert_not_called)
 
         assert response.status_code == 200, response.content
 
@@ -1209,8 +1834,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         response = self.do_request(
             data={
                 "project": self.project.id,
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": [field],
                 "query": query,
@@ -1275,8 +1900,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
                 "environment": "production",
                 "excludeOther": 1,
                 "field": [field, "group_tag"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": f"-{field}",
                 "partial": 1,
@@ -1351,8 +1976,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metricsEnhanced",
                 "field": [network_id_tag, agg],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": f"-{agg}",
                 "interval": "1d",
@@ -1371,11 +1996,11 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             assert datum["meta"] == {
                 "dataset": "metricsEnhanced",
                 "datasetReason": "unchanged",
-                "fields": {},
+                "fields": {"count": "integer", "networkId": "string", "time": "date"},
                 "isMetricsData": False,
                 "isMetricsExtractedData": True,
                 "tips": {},
-                "units": {},
+                "units": {"count": None, "networkId": None, "time": None},
             }
 
     def _test_is_metrics_extracted_data(
@@ -1410,6 +2035,30 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             dataset="metricsEnhanced",
         )
 
+    def test_on_demand_epm_no_query(self):
+        params = {
+            "dataset": "metricsEnhanced",
+            "environment": "production",
+            "onDemandType": "dynamic_query",
+            "project": self.project.id,
+            "query": "",
+            "statsPeriod": "1h",
+            "useOnDemandMetrics": "true",
+            "yAxis": ["epm()"],
+        }
+        response = self.do_request(params)
+
+        assert response.status_code == 200, response.content
+        assert response.data["meta"] == {
+            "fields": {"time": "date", "epm": "rate"},
+            "units": {"time": None, "epm": None},
+            "isMetricsData": True,
+            "isMetricsExtractedData": False,
+            "tips": {},
+            "datasetReason": "unchanged",
+            "dataset": "metricsEnhanced",
+        }
+
     def test_group_by_transaction(self):
         field = "count()"
         groupbys = ["transaction"]
@@ -1438,8 +2087,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
                 "environment": "production",
                 "excludeOther": 1,
                 "field": [field, "transaction"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=2)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
                 "interval": "1h",
                 "orderby": f"-{field}",
                 "partial": 1,
@@ -1508,8 +2157,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metricsEnhanced",
                 "field": ["networkId", "count()"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": "-count()",
                 "interval": "1d",
@@ -1535,11 +2184,11 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             assert datum["meta"] == {
                 "dataset": "metricsEnhanced",
                 "datasetReason": "unchanged",
-                "fields": {},
+                "fields": {"count": "integer", "networkId": "string", "time": "date"},
                 "isMetricsData": False,
                 "isMetricsExtractedData": True,
                 "tips": {},
-                "units": {},
+                "units": {"count": None, "networkId": None, "time": None},
             }
 
     def test_order_by_aggregate_top_events_asc(self):
@@ -1550,8 +2199,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metricsEnhanced",
                 "field": ["networkId", "count()"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": "count()",
                 "interval": "1d",
@@ -1577,11 +2226,11 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             assert datum["meta"] == {
                 "dataset": "metricsEnhanced",
                 "datasetReason": "unchanged",
-                "fields": {},
+                "fields": {"count": "integer", "networkId": "string", "time": "date"},
                 "isMetricsData": False,
                 "isMetricsExtractedData": True,
                 "tips": {},
-                "units": {},
+                "units": {"count": None, "networkId": None, "time": None},
             }
 
     def test_order_by_aggregate_top_events_graph_different_aggregate(self):
@@ -1592,8 +2241,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metricsEnhanced",
                 "field": ["networkId", "count()"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": "count()",
                 "interval": "1d",
@@ -1619,11 +2268,19 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             assert datum["meta"] == {
                 "dataset": "metricsEnhanced",
                 "datasetReason": "unchanged",
-                "fields": {},
+                "fields": {
+                    "networkId": "string",
+                    "p95_transaction_duration": "duration",
+                    "time": "date",
+                },
                 "isMetricsData": False,
                 "isMetricsExtractedData": True,
                 "tips": {},
-                "units": {},
+                "units": {
+                    "networkId": None,
+                    "p95_transaction_duration": "millisecond",
+                    "time": None,
+                },
             }
 
     def test_cannot_order_by_tag(self):
@@ -1634,8 +2291,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metrics",
                 "field": ["networkId", "count()"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": "-networkId",
                 "interval": "1d",
@@ -1659,8 +2316,8 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
             data={
                 "dataset": "metrics",
                 "field": ["networkId", "count()", "p95(transaction.duration)"],
-                "start": iso_format(self.day_ago),
-                "end": iso_format(self.day_ago + timedelta(hours=5)),
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=5),
                 "onDemandType": "dynamic_query",
                 "orderby": ["count()", "p95(transaction.duration)"],
                 "interval": "1d",
@@ -1675,3 +2332,42 @@ class OrganizationEventsStatsMetricsEnhancedPerformanceEndpointTestWithOnDemandW
         )
 
         assert response.status_code == 400, response.content
+
+    def test_top_events_with_tag(self):
+        query = "transaction.duration:>=100"
+        yAxis = ["count()"]
+        field = "count()"
+        groupbys = ["some-field"]
+        spec = OnDemandMetricSpec(
+            field=field, groupbys=groupbys, query=query, spec_type=MetricSpecType.DYNAMIC_QUERY
+        )
+        self.store_on_demand_metric(
+            1,
+            spec=spec,
+            additional_tags={
+                "some-field": "bar",
+                "environment": "production",
+            },
+            timestamp=self.day_ago,
+        )
+        response = self.do_request(
+            data={
+                "project": self.project.id,
+                "start": self.day_ago,
+                "end": self.day_ago + timedelta(hours=2),
+                "interval": "1h",
+                "orderby": ["-count()"],
+                "environment": "production",
+                "query": query,
+                "yAxis": yAxis,
+                "field": [
+                    "some-field",
+                    "count()",
+                ],
+                "topEvents": 5,
+                "dataset": "metrics",
+                "useOnDemandMetrics": "true",
+            },
+        )
+
+        assert response.status_code == 200, response.content

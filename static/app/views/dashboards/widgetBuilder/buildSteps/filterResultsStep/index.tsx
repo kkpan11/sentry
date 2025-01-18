@@ -13,10 +13,11 @@ import {ProjectPageFilter} from 'sentry/components/organizations/projectPageFilt
 import {IconAdd, IconDelete} from 'sentry/icons';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, PageFilters} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
 import {
   createOnDemandFilterWarning,
   isOnDemandQueryString,
+  shouldDisplayOnDemandWidgetWarning,
 } from 'sentry/utils/onDemandMetrics';
 import {hasOnDemandMetricWidgetFeature} from 'sentry/utils/onDemandMetrics/features';
 import type {UseApiQueryResult} from 'sentry/utils/queryClient';
@@ -26,16 +27,15 @@ import type RequestError from 'sentry/utils/requestError/requestError';
 import useOrganization from 'sentry/utils/useOrganization';
 import {getDatasetConfig} from 'sentry/views/dashboards/datasetConfig/base';
 import ReleasesSelectControl from 'sentry/views/dashboards/releasesSelectControl';
-import type {
-  DashboardFilters,
-  ValidateWidgetResponse,
-  WidgetQuery,
-} from 'sentry/views/dashboards/types';
 import {
   DashboardFilterKeys,
+  type DashboardFilters,
   OnDemandExtractionState,
-  WidgetType,
+  type ValidateWidgetResponse,
+  type WidgetQuery,
+  type WidgetType,
 } from 'sentry/views/dashboards/types';
+import {getDiscoverDatasetFromWidgetType} from 'sentry/views/dashboards/widgetBuilder/utils';
 
 import {BuildStep, SubHeading} from '../buildStep';
 
@@ -47,7 +47,6 @@ interface Props {
   onQueryChange: (queryIndex: number, newQuery: WidgetQuery) => void;
   onQueryConditionChange: (isQueryConditionValid: boolean) => void;
   onQueryRemove: (queryIndex: number) => void;
-  organization: Organization;
   queries: WidgetQuery[];
   selection: PageFilters;
   validatedWidgetResponse: UseApiQueryResult<ValidateWidgetResponse, RequestError>;
@@ -65,7 +64,6 @@ export function FilterResultsStep({
   onQueryRemove,
   onAddSearchConditions,
   onQueryChange,
-  organization,
   hideLegendAlias,
   queryErrors,
   widgetType,
@@ -73,13 +71,14 @@ export function FilterResultsStep({
   onQueryConditionChange,
   validatedWidgetResponse,
 }: Props) {
+  const organization = useOrganization();
   const [queryConditionValidity, setQueryConditionValidity] = useState<boolean[]>([]);
 
   const handleSearch = useCallback(
     (queryIndex: number) => {
       return (field: string) => {
         const newQuery: WidgetQuery = {
-          ...queries[queryIndex],
+          ...queries[queryIndex]!,
           conditions: field,
         };
 
@@ -96,7 +95,7 @@ export function FilterResultsStep({
         setQueryConditionValidity(queryConditionValidity);
         onQueryConditionChange(!queryConditionValidity.some(validity => !validity));
         const newQuery: WidgetQuery = {
-          ...queries[queryIndex],
+          ...queries[queryIndex]!,
           conditions: field,
         };
         onQueryChange(queryIndex, newQuery);
@@ -122,8 +121,6 @@ export function FilterResultsStep({
       }
     )
   );
-  const shouldDisplayOnDemandWarning =
-    hasOnDemandMetricWidgetFeature(organization) && widgetType === WidgetType.DISCOVER;
 
   return (
     <BuildStep
@@ -171,15 +168,17 @@ export function FilterResultsStep({
               <SearchConditionsWrapper>
                 <datasetConfig.SearchBar
                   getFilterWarning={
-                    shouldDisplayOnDemandWarning ? getOnDemandFilterWarning : undefined
+                    shouldDisplayOnDemandWidgetWarning(query, widgetType, organization)
+                      ? getOnDemandFilterWarning
+                      : undefined
                   }
-                  organization={organization}
                   pageFilters={selection}
                   onClose={handleClose(queryIndex)}
                   onSearch={handleSearch(queryIndex)}
                   widgetQuery={query}
+                  dataset={getDiscoverDatasetFromWidgetType(widgetType)}
                 />
-                {shouldDisplayOnDemandWarning && (
+                {shouldDisplayOnDemandWidgetWarning(query, widgetType, organization) && (
                   <WidgetOnDemandQueryWarning
                     query={query}
                     validatedWidgetResponse={validatedWidgetResponse}
@@ -194,7 +193,7 @@ export function FilterResultsStep({
                     placeholder={t('Legend Alias')}
                     onChange={event => {
                       const newQuery: WidgetQuery = {
-                        ...queries[queryIndex],
+                        ...queries[queryIndex]!,
                         name: event.target.value,
                       };
                       onQueryChange(queryIndex, newQuery);

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
@@ -9,32 +9,32 @@ from django.utils import timezone
 
 from sentry.backup.scopes import RelocationScope
 from sentry.db.models import (
-    BaseManager,
     BoundedPositiveIntegerField,
     FlexibleForeignKey,
     JSONField,
     Model,
-    region_silo_only_model,
+    region_silo_model,
     sane_repr,
 )
 from sentry.db.models.fields.hybrid_cloud_foreign_key import HybridCloudForeignKey
+from sentry.db.models.manager.base import BaseManager
 
 
+# NOTE: There are gaps in the numberation because a
+# few tasks were removed as they are no longer used in the quick start sidebar
 class OnboardingTask:
     FIRST_PROJECT = 1
     FIRST_EVENT = 2
     INVITE_MEMBER = 3
     SECOND_PLATFORM = 4
-    USER_CONTEXT = 5
     RELEASE_TRACKING = 6
     SOURCEMAPS = 7
-    USER_REPORTS = 8
     ISSUE_TRACKER = 9
     ALERT_RULE = 10
     FIRST_TRANSACTION = 11
-    METRIC_ALERT = 12
-    INTEGRATIONS = 13
     SESSION_REPLAY = 14
+    REAL_TIME_NOTIFICATIONS = 15
+    LINK_SENTRY_TO_SOURCE_CODE = 16
 
 
 class OnboardingTaskStatus:
@@ -48,7 +48,6 @@ class OnboardingTaskStatus:
 #   FIRST_EVENT:      { 'platform':  'flask', }
 #   INVITE_MEMBER:    { 'invited_member': user.id, 'teams': [team.id] }
 #   ISSUE_TRACKER:    { 'plugin': 'plugin_name' }
-#   ISSUE_ASSIGNMENT: { 'assigned_member': user.id }
 #   SECOND_PLATFORM:  { 'platform': 'javascript' }
 #
 # NOTE: Currently the `PENDING` status is applicable for the following
@@ -56,8 +55,6 @@ class OnboardingTaskStatus:
 #
 #   FIRST_EVENT:     User confirms that sdk has been installed
 #   INVITE_MEMBER:   Until the member has successfully joined org
-#   SECOND_PLATFORM: User confirms that sdk has been installed
-#   USER_CONTEXT:    User has added user context to sdk
 #   ISSUE_TRACKER:   Tracker added, issue not yet created
 
 
@@ -101,9 +98,10 @@ class AbstractOnboardingTask(Model):
     completion_seen = models.DateTimeField(null=True)
     date_completed = models.DateTimeField(default=timezone.now)
     project = FlexibleForeignKey("sentry.Project", db_constraint=False, null=True)
-    data = JSONField()  # INVITE_MEMBER { invited_member: user.id }
+    # INVITE_MEMBER { invited_member: user.id }
+    data: models.Field[dict[str, Any], dict[str, Any]] = JSONField()
 
-    # fields for typing
+    # abstract
     TASK_LOOKUP_BY_KEY: dict[str, int]
     SKIPPABLE_TASKS: frozenset[int]
 
@@ -111,7 +109,7 @@ class AbstractOnboardingTask(Model):
         abstract = True
 
 
-@region_silo_only_model
+@region_silo_model
 class OrganizationOnboardingTask(AbstractOnboardingTask):
     """
     Onboarding tasks walk new Sentry orgs through basic features of Sentry.
@@ -122,16 +120,16 @@ class OrganizationOnboardingTask(AbstractOnboardingTask):
         (OnboardingTask.FIRST_EVENT, "send_first_event"),
         (OnboardingTask.INVITE_MEMBER, "invite_member"),
         (OnboardingTask.SECOND_PLATFORM, "setup_second_platform"),
-        (OnboardingTask.USER_CONTEXT, "setup_user_context"),
         (OnboardingTask.RELEASE_TRACKING, "setup_release_tracking"),
         (OnboardingTask.SOURCEMAPS, "setup_sourcemaps"),
-        (OnboardingTask.USER_REPORTS, "setup_user_reports"),
+        # TODO(Telemety Experience): This task is no longer shown
+        # in the new experience and shall remove it from code
         (OnboardingTask.ISSUE_TRACKER, "setup_issue_tracker"),
         (OnboardingTask.ALERT_RULE, "setup_alert_rules"),
         (OnboardingTask.FIRST_TRANSACTION, "setup_transactions"),
-        (OnboardingTask.METRIC_ALERT, "setup_metric_alert_rules"),
-        (OnboardingTask.INTEGRATIONS, "setup_integrations"),
         (OnboardingTask.SESSION_REPLAY, "setup_session_replay"),
+        (OnboardingTask.REAL_TIME_NOTIFICATIONS, "setup_real_time_notifications"),
+        (OnboardingTask.LINK_SENTRY_TO_SOURCE_CODE, "link_sentry_to_source_code"),
     )
 
     # Used in the API to map IDs to string keys. This keeps things
@@ -141,7 +139,7 @@ class OrganizationOnboardingTask(AbstractOnboardingTask):
 
     task = BoundedPositiveIntegerField(choices=[(k, str(v)) for k, v in TASK_CHOICES])
 
-    # Tasks which must be completed for the onboarding to be considered
+    # Tasks which should be completed for the onboarding to be considered
     # complete.
     REQUIRED_ONBOARDING_TASKS = frozenset(
         [
@@ -149,15 +147,19 @@ class OrganizationOnboardingTask(AbstractOnboardingTask):
             OnboardingTask.FIRST_EVENT,
             OnboardingTask.INVITE_MEMBER,
             OnboardingTask.SECOND_PLATFORM,
-            OnboardingTask.USER_CONTEXT,
             OnboardingTask.RELEASE_TRACKING,
-            OnboardingTask.SOURCEMAPS,
-            OnboardingTask.ISSUE_TRACKER,
             OnboardingTask.ALERT_RULE,
             OnboardingTask.FIRST_TRANSACTION,
-            OnboardingTask.METRIC_ALERT,
-            OnboardingTask.INTEGRATIONS,
             OnboardingTask.SESSION_REPLAY,
+            OnboardingTask.REAL_TIME_NOTIFICATIONS,
+            OnboardingTask.LINK_SENTRY_TO_SOURCE_CODE,
+        ]
+    )
+
+    REQUIRED_ONBOARDING_TASKS_WITH_SOURCE_MAPS = frozenset(
+        [
+            *REQUIRED_ONBOARDING_TASKS,
+            OnboardingTask.SOURCEMAPS,
         ]
     )
 
@@ -165,16 +167,13 @@ class OrganizationOnboardingTask(AbstractOnboardingTask):
         [
             OnboardingTask.INVITE_MEMBER,
             OnboardingTask.SECOND_PLATFORM,
-            OnboardingTask.USER_CONTEXT,
             OnboardingTask.RELEASE_TRACKING,
             OnboardingTask.SOURCEMAPS,
-            OnboardingTask.USER_REPORTS,
-            OnboardingTask.ISSUE_TRACKER,
             OnboardingTask.ALERT_RULE,
             OnboardingTask.FIRST_TRANSACTION,
-            OnboardingTask.METRIC_ALERT,
-            OnboardingTask.INTEGRATIONS,
             OnboardingTask.SESSION_REPLAY,
+            OnboardingTask.REAL_TIME_NOTIFICATIONS,
+            OnboardingTask.LINK_SENTRY_TO_SOURCE_CODE,
         ]
     )
 

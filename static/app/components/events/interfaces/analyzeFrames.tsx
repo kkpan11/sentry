@@ -7,8 +7,8 @@ import {
 import {getCurrentThread} from 'sentry/components/events/interfaces/utils';
 import ExternalLink from 'sentry/components/links/externalLink';
 import {t, tct} from 'sentry/locale';
-import type {EntryException, Event, Frame, Lock, Thread} from 'sentry/types';
-import {EntryType} from 'sentry/types';
+import type {EntryException, Event, Frame, Lock, Thread} from 'sentry/types/event';
+import {EntryType} from 'sentry/types/event';
 import {defined} from 'sentry/utils';
 
 type SuspectFrame = {
@@ -171,7 +171,7 @@ function satisfiesFunctionCondition(frame: Frame, suspect: SuspectFrame) {
     return false;
   }
   for (let index = 0; index < suspect.functions.length; index++) {
-    const matchFuction = suspect.functions[index];
+    const matchFuction = suspect.functions[index]!;
     const match =
       typeof matchFuction === 'string'
         ? frame.function === matchFuction
@@ -219,7 +219,7 @@ export function analyzeFramesForRootCause(event: Event): {
 
   // iterating the frames in reverse order, because the topmost frames most like the root cause
   for (let index = exceptionFrames.length - 1; index >= 0; index--) {
-    const frame = exceptionFrames[index];
+    const frame = exceptionFrames[index]!;
     const rootCause = analyzeFrameForRootCause(frame, currentThread);
     if (defined(rootCause)) {
       return rootCause;
@@ -298,5 +298,5 @@ export function analyzeFrameForRootCause(
 }
 
 const Bold = styled('span')`
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;

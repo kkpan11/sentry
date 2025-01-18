@@ -3,8 +3,8 @@ import {Fragment} from 'react';
 import {Alert} from 'sentry/components/alert';
 import ExternalLink from 'sentry/components/links/externalLink';
 import {t, tct, tn} from 'sentry/locale';
-import type {IgnoredStatusDetails} from 'sentry/types';
 import {capitalize} from 'sentry/utils/string/capitalize';
+import commonTheme from 'sentry/utils/theme';
 
 import ExtraDescription from './extraDescription';
 
@@ -102,7 +102,7 @@ export function getConfirm({
                 'Bulk deletion is only recommended for junk data. To clear your stream, consider resolving or ignoring. [link:When should I delete events?]',
                 {
                   link: (
-                    <ExternalLink href="https://help.sentry.io/account/billing/when-should-i-delete-events/" />
+                    <ExternalLink href="https://sentry.zendesk.com/hc/en-us/articles/23813143627675-When-should-I-delete-events" />
                   ),
                 }
               )}
@@ -156,8 +156,15 @@ export function getLabel(numIssues: number, allInQuerySelected: boolean) {
   };
 }
 
-export function performanceIssuesSupportsIgnoreAction(
-  statusDetails: IgnoredStatusDetails
-) {
-  return !(statusDetails.ignoreWindow || statusDetails.ignoreUserWindow);
-}
+// A mapping of which screen sizes will trigger the column to disappear
+// e.g. 'Trend': screen.small => 'Trend' column will disappear on screen.small widths
+export const COLUMN_BREAKPOINTS = {
+  ISSUE: undefined, // Issue column is always visible
+  TREND: commonTheme.breakpoints.small,
+  AGE: commonTheme.breakpoints.xlarge,
+  SEEN: commonTheme.breakpoints.xlarge,
+  EVENTS: commonTheme.breakpoints.medium,
+  USERS: commonTheme.breakpoints.medium,
+  PRIORITY: commonTheme.breakpoints.large,
+  ASSIGNEE: commonTheme.breakpoints.xsmall,
+};

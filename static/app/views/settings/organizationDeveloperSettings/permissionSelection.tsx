@@ -4,7 +4,11 @@ import SelectField from 'sentry/components/forms/fields/selectField';
 import FormContext from 'sentry/components/forms/formContext';
 import {SENTRY_APP_PERMISSIONS} from 'sentry/constants';
 import {t} from 'sentry/locale';
-import type {PermissionResource, Permissions, PermissionValue} from 'sentry/types';
+import type {
+  PermissionResource,
+  Permissions,
+  PermissionValue,
+} from 'sentry/types/integrations';
 
 /**
  * Custom form element that presents API scopes in a resource-centric way. Meaning
@@ -108,6 +112,7 @@ export default class PermissionSelection extends Component<Props, State> {
     permissions: this.props.permissions,
   };
 
+  declare context: Required<React.ContextType<typeof FormContext>>;
   static contextType = FormContext;
 
   onChange = (resource: PermissionResource, choice: PermissionValue) => {
@@ -119,7 +124,10 @@ export default class PermissionSelection extends Component<Props, State> {
   save = (permissions: Permissions) => {
     this.setState({permissions});
     this.props.onChange(permissions);
-    this.context.form.setValue('scopes', permissionStateToList(this.state.permissions));
+    this.context.form.setValue(
+      'scopes',
+      permissionStateToList(this.state.permissions) as string[]
+    );
   };
 
   render() {

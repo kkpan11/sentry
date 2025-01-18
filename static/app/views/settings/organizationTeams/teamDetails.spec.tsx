@@ -8,7 +8,7 @@ import TeamStore from 'sentry/stores/teamStore';
 import TeamDetails from 'sentry/views/settings/organizationTeams/teamDetails';
 
 describe('TeamMembers', () => {
-  let joinMock;
+  let joinMock: any;
 
   const organization = OrganizationFixture();
   const team = TeamFixture({hasAccess: false});
@@ -29,7 +29,7 @@ describe('TeamMembers', () => {
   });
 
   it('can request membership', async () => {
-    const {routerProps, routerContext} = initializeOrg({
+    const {routerProps, router} = initializeOrg({
       organization,
       router: {
         params: {orgId: organization.slug, teamId: team.slug},
@@ -40,7 +40,7 @@ describe('TeamMembers', () => {
       <TeamDetails {...routerProps}>
         <div data-test-id="test" />
       </TeamDetails>,
-      {organization, context: routerContext}
+      {organization, router}
     );
 
     await userEvent.click(screen.getByRole('button', {name: 'Request Access'}));
@@ -50,7 +50,7 @@ describe('TeamMembers', () => {
   });
 
   it('displays children', () => {
-    const {routerContext, routerProps} = initializeOrg({
+    const {router, routerProps} = initializeOrg({
       organization,
       router: {
         params: {orgId: organization.slug, teamId: teamHasAccess.slug},
@@ -60,7 +60,7 @@ describe('TeamMembers', () => {
       <TeamDetails {...routerProps}>
         <div data-test-id="test" />
       </TeamDetails>,
-      {organization, context: routerContext}
+      {organization, router}
     );
 
     expect(screen.getByTestId('test')).toBeInTheDocument();

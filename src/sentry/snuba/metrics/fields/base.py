@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Deque, Optional, Union
 
+from django.db.models import QuerySet
 from snuba_sdk import Column, Condition, Entity, Function, Granularity, Op, Query, Request
 from snuba_sdk.orderby import Direction, OrderBy
 
@@ -23,6 +24,7 @@ from sentry.snuba.metrics.fields.snql import (
     abnormal_sessions,
     abnormal_users,
     addition,
+    all_duration_transactions,
     all_sessions,
     all_spans,
     all_transactions,
@@ -46,6 +48,7 @@ from sentry.snuba.metrics.fields.snql import (
     min_timestamp,
     miserable_users,
     on_demand_apdex_snql_factory,
+    on_demand_count_unique_snql_factory,
     on_demand_count_web_vitals_snql_factory,
     on_demand_epm_snql_factory,
     on_demand_eps_snql_factory,
@@ -104,7 +107,7 @@ PostQueryFuncReturnType = Optional[Union[tuple[Any, ...], ClickhouseHistogram, i
 MetricOperationParams = Mapping[str, Union[str, int, float]]
 
 
-def run_metrics_query(
+def build_metrics_query(
     *,
     entity_key: EntityKey,
     select: list[Column],
@@ -112,18 +115,15 @@ def run_metrics_query(
     groupby: list[Column],
     project_ids: Sequence[int],
     org_id: int,
-    referrer: str,
     use_case_id: UseCaseID,
     start: datetime | None = None,
     end: datetime | None = None,
-) -> list[SnubaDataType]:
+) -> Request:
     if end is None:
         end = datetime.now()
     if start is None:
         start = end - timedelta(hours=24)
 
-    # Round timestamp to minute to get cache efficiency:
-    # Also floor start to match the daily granularity
     end = end.replace(second=0, microsecond=0)
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -140,11 +140,44 @@ def run_metrics_query(
         + where,
         granularity=Granularity(GRANULARITY),
     )
+
     request = Request(
-        dataset=Dataset.Metrics.value,
+        dataset=(
+            Dataset.Metrics.value
+            if use_case_id == UseCaseID.SESSIONS
+            else Dataset.PerformanceMetrics.value
+        ),
         app_id="metrics",
         query=query,
         tenant_ids={"organization_id": org_id, "use_case_id": use_case_id.value},
+    )
+
+    return request
+
+
+def run_metrics_query(
+    *,
+    entity_key: EntityKey,
+    select: list[Column],
+    where: list[Condition],
+    groupby: list[Column],
+    project_ids: Sequence[int],
+    org_id: int,
+    referrer: str,
+    use_case_id: UseCaseID,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[SnubaDataType]:
+    request = build_metrics_query(
+        entity_key=entity_key,
+        select=select,
+        where=where,
+        groupby=groupby,
+        project_ids=project_ids,
+        org_id=org_id,
+        use_case_id=use_case_id,
+        start=start,
+        end=end,
     )
     result = raw_snql_query(request, referrer, use_cache=True)
     return result["data"]
@@ -188,7 +221,7 @@ def _get_known_entity_of_metric_mri(metric_mri: str) -> EntityKey | None:
 
 
 def _get_entity_of_metric_mri(
-    projects: Sequence[Project], metric_mri: str, use_case_id: UseCaseID
+    projects: QuerySet[Project] | Sequence[Project], metric_mri: str, use_case_id: UseCaseID
 ) -> EntityKey:
     known_entity = _get_known_entity_of_metric_mri(metric_mri)
     if known_entity is not None:
@@ -572,7 +605,7 @@ class MetricExpressionBase(ABC):
 
     @abstractmethod
     def get_entity(
-        self, projects: Sequence[Project], use_case_id: UseCaseID
+        self, projects: QuerySet[Project] | Sequence[Project], use_case_id: UseCaseID
     ) -> MetricEntity | dict[MetricEntity, Sequence[str]]:
         """
         Method that generates the entity of an instance of MetricsFieldBase.
@@ -745,7 +778,9 @@ class MetricExpression(MetricExpressionDefinition, MetricExpressionBase):
     def validate_can_orderby(self) -> None:
         self.metric_operation.validate_can_orderby()
 
-    def get_entity(self, projects: Sequence[Project], use_case_id: UseCaseID) -> MetricEntity:
+    def get_entity(
+        self, projects: QuerySet[Project] | Sequence[Project], use_case_id: UseCaseID
+    ) -> MetricEntity:
         return _get_entity_of_metric_mri(projects, self.metric_object.metric_mri, use_case_id).value
 
     def generate_select_statements(
@@ -950,7 +985,9 @@ class SingularEntityDerivedMetric(DerivedMetricExpression):
             )
         return entities
 
-    def get_entity(self, projects: Sequence[Project], use_case_id: UseCaseID) -> MetricEntity:
+    def get_entity(
+        self, projects: QuerySet[Project] | Sequence[Project], use_case_id: UseCaseID
+    ) -> MetricEntity:
         if not projects:
             self._raise_entity_validation_exception("get_entity")
         try:
@@ -1175,7 +1212,7 @@ class CompositeEntityDerivedMetric(DerivedMetricExpression):
         return default_null_value
 
     def get_entity(
-        self, projects: Sequence[Project], use_case_id: UseCaseID
+        self, projects: QuerySet[Project] | Sequence[Project], use_case_id: UseCaseID
     ) -> dict[MetricEntity, list[str]]:
         if not projects:
             self._raise_entity_validation_exception("get_entity")
@@ -1295,8 +1332,10 @@ class CompositeEntityDerivedMetric(DerivedMetricExpression):
         compute_func_args = []
         for constituent in self.metrics:
             key = f"{constituent}{COMPOSITE_ENTITY_CONSTITUENT_ALIAS}{alias}"
-            compute_func_args.append(data[key]) if idx is None else compute_func_args.append(
-                data[key][idx]
+            (
+                compute_func_args.append(data[key])
+                if idx is None
+                else compute_func_args.append(data[key][idx])
             )
         # ToDo(ahmed): This won't work if there is not post_query_func because there is an assumption that this function
         #  will aggregate the result somehow
@@ -1574,6 +1613,14 @@ DERIVED_METRICS = {
             ),
         ),
         SingularEntityDerivedMetric(
+            metric_mri=TransactionMRI.ALL_DURATION.value,
+            metrics=[TransactionMRI.DURATION.value],
+            unit="transactions",
+            snql=lambda project_ids, org_id, metric_ids, alias=None: all_duration_transactions(
+                metric_ids=metric_ids, alias=alias
+            ),
+        ),
+        SingularEntityDerivedMetric(
             metric_mri=TransactionMRI.FAILURE_COUNT.value,
             metrics=[TransactionMRI.DURATION.value],
             unit="transactions",
@@ -1585,7 +1632,7 @@ DERIVED_METRICS = {
             metric_mri=TransactionMRI.FAILURE_RATE.value,
             metrics=[
                 TransactionMRI.FAILURE_COUNT.value,
-                TransactionMRI.ALL.value,
+                TransactionMRI.ALL_DURATION.value,
             ],
             unit="transactions",
             snql=lambda failure_count, tx_count, project_ids, org_id, metric_ids, alias=None: division_float(
@@ -1604,7 +1651,7 @@ DERIVED_METRICS = {
             metric_mri=TransactionMRI.HTTP_ERROR_RATE.value,
             metrics=[
                 TransactionMRI.HTTP_ERROR_COUNT.value,
-                TransactionMRI.ALL.value,
+                TransactionMRI.ALL_DURATION.value,
             ],
             unit="transactions",
             snql=lambda http_error_count, tx_count, project_ids, org_id, metric_ids, alias=None: division_float(
@@ -1843,6 +1890,11 @@ DERIVED_OPS: Mapping[MetricOperationType, DerivedOp] = {
             can_orderby=True,
             snql_func=on_demand_failure_rate_snql_factory,
             default_null_value=0,
+        ),
+        DerivedOp(
+            op="on_demand_count_unique",
+            can_orderby=True,
+            snql_func=on_demand_count_unique_snql_factory,
         ),
         DerivedOp(
             op="on_demand_count_web_vitals",

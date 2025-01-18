@@ -26,20 +26,20 @@ from sentry.api.exceptions import (
 from sentry.api.utils import MAX_STATS_PERIOD
 from sentry.auth.access import NoAccess, from_request
 from sentry.auth.authenticators.totp import TotpInterface
-from sentry.auth.staff import is_active_staff
 from sentry.constants import ALL_ACCESS_PROJECTS_SLUG
 from sentry.models.apikey import ApiKey
 from sentry.models.authidentity import AuthIdentity
 from sentry.models.authprovider import AuthProvider
 from sentry.models.organization import Organization
 from sentry.models.organizationmember import OrganizationMember
-from sentry.services.hybrid_cloud.organization import organization_service
-from sentry.services.hybrid_cloud.user.serial import serialize_rpc_user
-from sentry.services.hybrid_cloud.user.service import user_service
-from sentry.silo import SiloMode
+from sentry.organizations.services.organization import organization_service
+from sentry.silo.base import SiloMode
 from sentry.testutils.cases import TestCase
 from sentry.testutils.helpers.datetime import freeze_time
-from sentry.testutils.silo import assume_test_silo_mode, region_silo_test
+from sentry.testutils.requests import drf_request_from_request
+from sentry.testutils.silo import assume_test_silo_mode
+from sentry.users.services.user.serial import serialize_rpc_user
+from sentry.users.services.user.service import user_service
 
 
 class MockSuperUser:
@@ -84,15 +84,15 @@ class PermissionBaseTestCase(TestCase):
         request = self.make_request(
             user=user, auth=auth, method=method, is_superuser=is_superuser, is_staff=is_staff
         )
+        drf_request = drf_request_from_request(request)
         result_with_obj = perm.has_permission(
-            request=request, view=None
-        ) and perm.has_object_permission(request=request, view=None, organization=obj)
+            request=drf_request, view=None
+        ) and perm.has_object_permission(request=drf_request, view=None, organization=obj)
         if result_with_org_rpc is not None:
             return bool(result_with_obj and result_with_org_rpc and result_with_org_context_rpc)
         return result_with_obj
 
 
-@region_silo_test
 class OrganizationPermissionTest(PermissionBaseTestCase):
     def org_require_2fa(self):
         self.org.update(flags=F("flags").bitor(Organization.flags.require_2fa))
@@ -219,7 +219,6 @@ class OrganizationPermissionTest(PermissionBaseTestCase):
             assert not self.has_object_perm("POST", self.org, user=user)
 
 
-@region_silo_test
 class OrganizationAndStaffPermissionTest(PermissionBaseTestCase):
     def setUp(self):
         super().setUp()
@@ -233,24 +232,19 @@ class OrganizationAndStaffPermissionTest(PermissionBaseTestCase):
         superuser = self.create_user(is_superuser=True)
         assert self.has_object_perm("GET", self.org, user=superuser, is_superuser=True)
 
-    @mock.patch("sentry.api.permissions.is_active_staff", wraps=is_active_staff)
-    def test_staff(self, mock_is_active_staff):
+    def test_staff(self):
         staff_user = self.create_user(is_staff=True)
-
         assert self.has_object_perm("GET", self.org, user=staff_user, is_staff=True)
-        # ensure we fail the scope check and call is_active_staff
-        assert mock_is_active_staff.call_count == 3
 
-    @mock.patch("sentry.api.permissions.is_active_staff", wraps=is_active_staff)
-    def test_staff_passes_2FA(self, mock_is_active_staff):
+    def test_staff_passes_2FA(self):
         staff_user = self.create_user(is_staff=True)
         request = self.make_request(user=serialize_rpc_user(staff_user), is_staff=True)
+        drf_request = drf_request_from_request(request)
         permission = self.permission_cls()
         self.org.flags.require_2fa = True
         self.org.save()
 
-        assert not permission.is_not_2fa_compliant(request=request, organization=self.org)
-        assert mock_is_active_staff.call_count == 1
+        assert not permission.is_not_2fa_compliant(request=drf_request, organization=self.org)
 
 
 class BaseOrganizationEndpointTest(TestCase):
@@ -285,11 +279,11 @@ class BaseOrganizationEndpointTest(TestCase):
         if user is None:
             user = self.user
         request.user = user
+        request.auth = None
         request.access = from_request(request, self.org)
         return request
 
 
-@region_silo_test
 class GetProjectIdsTest(BaseOrganizationEndpointTest):
     def setUp(self):
         self.team_1 = self.create_team(organization=self.org)
@@ -390,6 +384,7 @@ class GetProjectIdsTest(BaseOrganizationEndpointTest):
         request = RequestFactory().get("/")
         request.session = SessionBase()
         request.access = NoAccess()
+        request.auth = None
         result = self.endpoint.get_projects(request, self.org)
         assert [] == result
 
@@ -512,7 +507,6 @@ class GetProjectIdsTest(BaseOrganizationEndpointTest):
             self.endpoint.get_projects(request, self.org)
 
 
-@region_silo_test
 class GetEnvironmentsTest(BaseOrganizationEndpointTest):
     def setUp(self):
         self.project = self.create_project(organization=self.org)
@@ -540,7 +534,6 @@ class GetEnvironmentsTest(BaseOrganizationEndpointTest):
             self.run_test([self.env_1, self.env_2], ["fake", self.env_2.name])
 
 
-@region_silo_test
 class GetFilterParamsTest(BaseOrganizationEndpointTest):
     def setUp(self):
         self.team_1 = self.create_team(organization=self.org)

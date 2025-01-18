@@ -1,4 +1,3 @@
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 import type {Location} from 'history';
 
@@ -10,13 +9,16 @@ import {
 } from 'sentry/components/charts/styles';
 import Panel from 'sentry/components/panels/panel';
 import {t} from 'sentry/locale';
-import type {Organization, Project, SelectValue} from 'sentry/types';
+import type {SelectValue} from 'sentry/types/core';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import type EventView from 'sentry/utils/discover/eventView';
 import {useMetricsCardinalityContext} from 'sentry/utils/performance/contexts/metricsCardinality';
 import {useMEPSettingContext} from 'sentry/utils/performance/contexts/metricsEnhancedSetting';
 import {removeHistogramQueryStrings} from 'sentry/utils/performance/histogram';
 import {decodeScalar} from 'sentry/utils/queryString';
+import {useNavigate} from 'sentry/utils/useNavigate';
 import {getTransactionMEPParamsIfApplicable} from 'sentry/views/performance/transactionSummary/transactionOverview/utils';
 import {DisplayModes} from 'sentry/views/performance/transactionSummary/utils';
 import {TransactionsListOption} from 'sentry/views/releases/detail/overview';
@@ -89,6 +91,8 @@ function TransactionSummaryCharts({
   withoutZerofill,
   project,
 }: Props) {
+  const navigate = useNavigate();
+
   function handleDisplayChange(value: string) {
     const display = decodeScalar(location.query.display, DisplayModes.DURATION);
     trackAnalytics('performance_views.transaction_summary.change_chart_display', {
@@ -97,7 +101,7 @@ function TransactionSummaryCharts({
       to_chart: value,
     });
 
-    browserHistory.push({
+    navigate({
       pathname: location.pathname,
       query: {
         ...removeHistogramQueryStrings(location, [ZOOM_START, ZOOM_END]),
@@ -107,14 +111,14 @@ function TransactionSummaryCharts({
   }
 
   function handleTrendDisplayChange(value: string) {
-    browserHistory.push({
+    navigate({
       pathname: location.pathname,
       query: {...location.query, trendFunction: value},
     });
   }
 
   function handleTrendColumnChange(value: string) {
-    browserHistory.push({
+    navigate({
       pathname: location.pathname,
       query: {
         ...location.query,
@@ -133,11 +137,11 @@ function TransactionSummaryCharts({
   let display = decodeScalar(location.query.display, DisplayModes.DURATION);
   let trendFunction = decodeScalar(
     location.query.trendFunction,
-    TREND_FUNCTIONS_OPTIONS[0].value
+    TREND_FUNCTIONS_OPTIONS[0]!.value
   ) as TrendFunctionField;
   let trendParameter = decodeScalar(
     location.query.trendParameter,
-    TREND_PARAMETERS_OPTIONS[0].value
+    TREND_PARAMETERS_OPTIONS[0]!.value
   );
 
   if (!Object.values(DisplayModes).includes(display as DisplayModes)) {
@@ -172,6 +176,16 @@ function TransactionSummaryCharts({
     mepSetting,
     mepCardinalityContext,
     organization
+  );
+
+  const hasTransactionSummaryCleanupFlag = organization.features.includes(
+    'performance-transaction-summary-cleanup'
+  );
+
+  const displayOptions = generateDisplayOptions(currentFilter).filter(
+    option =>
+      (hasTransactionSummaryCleanupFlag && option.value !== DisplayModes.USER_MISERY) ||
+      !hasTransactionSummaryCleanupFlag
   );
 
   return (
@@ -291,7 +305,7 @@ function TransactionSummaryCharts({
           <OptionSelector
             title={t('Display')}
             selected={display}
-            options={generateDisplayOptions(currentFilter)}
+            options={displayOptions}
             onChange={handleDisplayChange}
           />
         </InlineContainer>

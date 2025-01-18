@@ -6,9 +6,8 @@ import {OrganizationFixture} from 'sentry-fixture/organization';
 import {ProjectFixture} from 'sentry-fixture/project';
 import {RouterFixture} from 'sentry-fixture/routerFixture';
 
-import {render, screen, waitFor} from 'sentry-test/reactTestingLibrary';
+import {render, screen} from 'sentry-test/reactTestingLibrary';
 
-import {RouteContext} from 'sentry/views/routeContext';
 import SharedGroupDetails from 'sentry/views/sharedGroupDetails';
 
 describe('SharedGroupDetails', function () {
@@ -52,37 +51,34 @@ describe('SharedGroupDetails', function () {
 
   it('renders', async function () {
     render(
-      <RouteContext.Provider value={{router, ...router}}>
-        <SharedGroupDetails
-          params={params}
-          api={new MockApiClient()}
-          route={{}}
-          router={router}
-          routes={router.routes}
-          routeParams={router.params}
-          location={router.location}
-        />
-      </RouteContext.Provider>
+      <SharedGroupDetails
+        params={params}
+        route={{}}
+        router={router}
+        routes={router.routes}
+        routeParams={router.params}
+        location={router.location}
+      />,
+      {router}
     );
-    await waitFor(() => expect(screen.getByText('Details')).toBeInTheDocument());
+    await screen.findByText('Details');
   });
 
   it('renders with org slug in path', async function () {
     const params_with_slug = {shareId: 'a', orgId: 'test-org'};
     const router_with_slug = RouterFixture({params_with_slug});
     render(
-      <RouteContext.Provider value={{router, ...router}}>
-        <SharedGroupDetails
-          params={params}
-          api={new MockApiClient()}
-          route={{}}
-          router={router_with_slug}
-          routes={router_with_slug.routes}
-          routeParams={router_with_slug.params}
-          location={router_with_slug.location}
-        />
-      </RouteContext.Provider>
+      <SharedGroupDetails
+        params={params}
+        route={{}}
+        router={router_with_slug}
+        routes={router_with_slug.routes}
+        routeParams={router_with_slug.params}
+        location={router_with_slug.location}
+      />,
+      {router}
     );
-    await waitFor(() => expect(screen.getByText('Details')).toBeInTheDocument());
+    await screen.findByText('Details');
+    await screen.findByTestId('sgh-timestamp');
   });
 });

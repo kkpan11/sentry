@@ -1,14 +1,30 @@
 from typing import Any
 
-from sentry.grouping.utils import get_rule_bool
+from sentry.grouping.utils import bool_from_string
 from sentry.stacktraces.functions import get_function_name_for_frame
 from sentry.stacktraces.platform import get_behavior_family_for_platform
 from sentry.utils import metrics
-from sentry.utils.functional import cached
 from sentry.utils.glob import glob_match
 from sentry.utils.safe import get_path
 
 from .exceptions import InvalidEnhancerConfig
+
+
+def _cached(cache, function, *args, **kwargs):
+    """Calls ``function`` or retrieves its return value from the ``cache``.
+
+    This is similar to ``functools.cache``, but uses a custom cache instead
+    of a global one. The cache can be shared between multiple functions.
+    """
+    key = (function, args, tuple(sorted(kwargs.items())))
+
+    if key in cache:
+        rv = cache[key]
+    else:
+        rv = cache[key] = function(*args)
+
+    return rv
+
 
 MATCH_KEYS = {
     "path": "p",
@@ -44,6 +60,9 @@ MATCHERS = {
     "path": "path",
     "package": "package",
     "function": "function",
+    "type": "type",
+    "value": "value",
+    "mechanism": "mechanism",
     "category": "category",
     # fingerprinting specific fields
     "family": "family",
@@ -64,6 +83,7 @@ def create_match_frame(frame_data: dict, platform: str | None) -> dict:
         family=get_behavior_family_for_platform(frame_data.get("platform") or platform),
         function=_get_function_name(frame_data, platform),
         in_app=frame_data.get("in_app"),
+        orig_in_app=get_path(frame_data, "data", "orig_in_app"),
         module=get_path(frame_data, "module"),
         package=frame_data.get("package"),
         path=frame_data.get("abs_path") or frame_data.get("filename"),
@@ -84,7 +104,7 @@ def create_match_frame(frame_data: dict, platform: str | None) -> dict:
     return match_frame
 
 
-class Match:
+class EnhancementMatch:
     def matches_frame(self, frames, idx, exception_data, cache):
         raise NotImplementedError()
 
@@ -95,9 +115,9 @@ class Match:
     def _from_config_structure(obj, version):
         val = obj
         if val.startswith("|[") and val.endswith("]"):
-            return CalleeMatch(Match._from_config_structure(val[2:-1], version))
+            return CalleeMatch(EnhancementMatch._from_config_structure(val[2:-1], version))
         if val.startswith("[") and val.endswith("]|"):
-            return CallerMatch(Match._from_config_structure(val[1:-2], version))
+            return CallerMatch(EnhancementMatch._from_config_structure(val[1:-2], version))
 
         if val.startswith("!"):
             negated = True
@@ -116,13 +136,13 @@ class Match:
 InstanceKey = tuple[str, str, bool]
 
 
-class FrameMatch(Match):
+class FrameMatch(EnhancementMatch):
     # Global registry of matchers
-    instances: dict[InstanceKey, Match] = {}
+    instances: dict[InstanceKey, EnhancementMatch] = {}
     field: Any = None
 
     @classmethod
-    def from_key(cls, key: str, pattern: str, negated: bool) -> Match:
+    def from_key(cls, key: str, pattern: str, negated: bool) -> EnhancementMatch:
         instance_key = (key, pattern, negated)
         if instance_key in cls.instances:
             instance = cls.instances[instance_key]
@@ -133,7 +153,7 @@ class FrameMatch(Match):
         return instance
 
     @classmethod
-    def _from_key(cls, key: str, pattern: str, negated: bool) -> Match:
+    def _from_key(cls, key: str, pattern: str, negated: bool) -> EnhancementMatch:
         subclass = {
             "package": PackageMatch,
             "path": PathMatch,
@@ -161,7 +181,8 @@ class FrameMatch(Match):
 
     @property
     def description(self) -> str:
-        return "{}:{}".format(
+        return "{}{}:{}".format(
+            self.negated and "!" or "",
             self.key,
             self.pattern.split() != [self.pattern] and '"%s"' % self.pattern or self.pattern,
         )
@@ -181,14 +202,15 @@ class FrameMatch(Match):
         if self.key == "family":
             arg = "".join(_f for _f in [FAMILIES.get(x) for x in self.pattern.split(",")] if _f)
         elif self.key == "app":
-            arg = {True: "1", False: "0"}.get(get_rule_bool(self.pattern), "")
+            boolified_pattern = bool_from_string(self.pattern)
+            arg = "1" if boolified_pattern is True else "0" if boolified_pattern is False else ""
         else:
             arg = self.pattern
         return ("!" if self.negated else "") + MATCH_KEYS[self.key] + arg
 
 
 def path_like_match(pattern, value):
-    """Stand-alone function for use with ``cached``"""
+    """Stand-alone function for use with ``_cached``"""
     if glob_match(value, pattern, ignorecase=False, doublestar=True, path_normalize=True):
         return True
     if not value.startswith(b"/") and glob_match(
@@ -201,14 +223,17 @@ def path_like_match(pattern, value):
 
 class PathLikeMatch(FrameMatch):
     def __init__(self, key, pattern, negated=False):
-        super().__init__(key, pattern.lower(), negated)
+        # NOTE: We do not want to mess with `pattern` directly, as that is used for the `description`.
+        # We rather want to `lower()` only the encoded pattern used within glob matching.
+        super().__init__(key, pattern, negated)
+        self._encoded_pattern = pattern.lower().encode("utf-8")
 
     def _positive_frame_match(self, match_frame, exception_data, cache):
         value = match_frame[self.field]
         if value is None:
             return False
 
-        return cached(cache, path_like_match, self._encoded_pattern, value)
+        return _cached(cache, path_like_match, self._encoded_pattern, value)
 
 
 class PackageMatch(PathLikeMatch):
@@ -234,7 +259,7 @@ class FamilyMatch(FrameMatch):
 class InAppMatch(FrameMatch):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._ref_val = get_rule_bool(self.pattern)
+        self._ref_val = bool_from_string(self.pattern)
 
     def _positive_frame_match(self, match_frame, exception_data, cache):
         ref_val = self._ref_val
@@ -249,7 +274,7 @@ class FrameFieldMatch(FrameMatch):
         if field == self._encoded_pattern:
             return True
 
-        return cached(cache, glob_match, field, self._encoded_pattern)
+        return _cached(cache, glob_match, field, self._encoded_pattern)
 
 
 class FunctionMatch(FrameFieldMatch):
@@ -276,7 +301,7 @@ class ExceptionFieldMatch(FrameMatch):
 
     def _positive_frame_match(self, frame_data, exception_data, cache):
         field = get_path(exception_data, *self.field_path) or "<unknown>"
-        return cached(cache, glob_match, field, self._encoded_pattern)
+        return _cached(cache, glob_match, field, self._encoded_pattern)
 
 
 class ExceptionTypeMatch(ExceptionFieldMatch):
@@ -291,7 +316,7 @@ class ExceptionMechanismMatch(ExceptionFieldMatch):
     field_path = ["mechanism", "type"]
 
 
-class CallerMatch(Match):
+class CallerMatch(EnhancementMatch):
     def __init__(self, inner: FrameMatch):
         self.inner = inner
 
@@ -306,7 +331,7 @@ class CallerMatch(Match):
         return idx > 0 and self.inner.matches_frame(frames, idx - 1, exception_data, cache)
 
 
-class CalleeMatch(Match):
+class CalleeMatch(EnhancementMatch):
     def __init__(self, inner: FrameMatch):
         self.inner = inner
 

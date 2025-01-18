@@ -13,9 +13,9 @@ from sentry.api.serializers.rest_framework import DashboardWidgetSerializer
 @region_silo_endpoint
 class OrganizationDashboardWidgetDetailsEndpoint(OrganizationEndpoint):
     publish_status = {
-        "POST": ApiPublishStatus.UNKNOWN,
+        "POST": ApiPublishStatus.PRIVATE,
     }
-    owner = ApiOwner.DISCOVER_N_DASHBOARDS
+    owner = ApiOwner.PERFORMANCE
     permission_classes = (OrganizationDashboardsPermission,)
 
     def post(self, request: Request, organization) -> Response:
@@ -37,6 +37,7 @@ class OrganizationDashboardWidgetDetailsEndpoint(OrganizationEndpoint):
                 "projects": self.get_projects(request, organization),
                 "displayType": request.data.get("displayType"),
                 "environment": request.GET.getlist("environment"),
+                "request": request,
             },
         )
         if not serializer.is_valid():

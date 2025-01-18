@@ -1,12 +1,12 @@
 import {Fragment} from 'react';
-import type {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 
 import {addErrorMessage} from 'sentry/actionCreators/indicator';
 import Access from 'sentry/components/acl/access';
 import Feature from 'sentry/components/acl/feature';
-import {Button} from 'sentry/components/button';
+import {Button, LinkButton} from 'sentry/components/button';
 import Confirm from 'sentry/components/confirm';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
 import FieldWrapper from 'sentry/components/forms/fieldGroup/fieldWrapper';
 import Form from 'sentry/components/forms/form';
 import JsonForm from 'sentry/components/forms/jsonForm';
@@ -17,19 +17,21 @@ import Panel from 'sentry/components/panels/panel';
 import PanelFooter from 'sentry/components/panels/panelFooter';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import PanelItem from 'sentry/components/panels/panelItem';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import {t, tct} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
 import ProjectsStore from 'sentry/stores/projectsStore';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project, Scope} from 'sentry/types';
-import {IssueTitle, IssueType} from 'sentry/types';
+import type {Scope} from 'sentry/types/core';
+import {IssueTitle, IssueType} from 'sentry/types/group';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import type {DynamicSamplingBiasType} from 'sentry/types/sampling';
 import {trackAnalytics} from 'sentry/utils/analytics';
-import {formatPercentage} from 'sentry/utils/formatters';
 import {safeGetQsParam} from 'sentry/utils/integrationUtil';
 import {isActiveSuperuser} from 'sentry/utils/isActiveSuperuser';
-import routeTitleGen from 'sentry/utils/routeTitle';
-import DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
+import {formatPercentage} from 'sentry/utils/number/formatPercentage';
 import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
 import PermissionAlert from 'sentry/views/settings/project/permissionAlert';
 
@@ -57,6 +59,8 @@ export const allowedSizeValues: number[] = [
   10000000,
 ]; // 50kb to 10MB in bytes
 
+export const allowedCountValues: number[] = [5, 10, 20, 50, 100];
+
 export const projectDetectorSettingsId = 'detector-threshold-settings';
 
 type ProjectPerformanceSettings = {[key: string]: number | boolean};
@@ -74,11 +78,13 @@ enum DetectorConfigAdmin {
   CONSECUTIVE_HTTP_ENABLED = 'consecutive_http_spans_detection_enabled',
   HTTP_OVERHEAD_ENABLED = 'http_overhead_detection_enabled',
   TRANSACTION_DURATION_REGRESSION_ENABLED = 'transaction_duration_regression_detection_enabled',
+  FUNCTION_DURATION_REGRESSION_ENABLED = 'function_duration_regression_detection_enabled',
 }
 
 export enum DetectorConfigCustomer {
   SLOW_DB_DURATION = 'slow_db_query_duration_threshold',
   N_PLUS_DB_DURATION = 'n_plus_one_db_duration_threshold',
+  N_PLUS_DB_COUNT = 'n_plus_one_db_count',
   N_PLUS_API_CALLS_DURATION = 'n_plus_one_api_calls_total_duration_threshold',
   RENDER_BLOCKING_ASSET_RATIO = 'render_blocking_fcp_ratio',
   LARGE_HTT_PAYLOAD_SIZE = 'large_http_payload_size_threshold',
@@ -105,17 +111,11 @@ type ProjectThreshold = {
   id?: string;
 };
 
-type State = DeprecatedAsyncView['state'] & {
+type State = DeprecatedAsyncComponent['state'] & {
   threshold: ProjectThreshold;
 };
 
-class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
-  getTitle() {
-    const {projectId} = this.props.params;
-
-    return routeTitleGen(t('Performance'), projectId, false);
-  }
-
+class ProjectPerformance extends DeprecatedAsyncComponent<Props, State> {
   getProjectEndpoint({orgId, projectId}: RouteParams) {
     return `/projects/${orgId}/${projectId}/`;
   }
@@ -124,11 +124,11 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
     return `/projects/${orgId}/${projectId}/performance-issues/configure/`;
   }
 
-  getEndpoints(): ReturnType<DeprecatedAsyncView['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {params, organization} = this.props;
     const {projectId} = params;
 
-    const endpoints: ReturnType<DeprecatedAsyncView['getEndpoints']> = [
+    const endpoints: ReturnType<DeprecatedAsyncComponent['getEndpoints']> = [
       [
         'threshold',
         `/projects/${organization.slug}/${projectId}/transaction-threshold/configure/`,
@@ -137,14 +137,14 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
     ];
 
     const performanceIssuesEndpoint: ReturnType<
-      DeprecatedAsyncView['getEndpoints']
+      DeprecatedAsyncComponent['getEndpoints']
     >[number] = [
       'performance_issue_settings',
       `/projects/${organization.slug}/${projectId}/performance-issues/configure/`,
     ];
 
     const generalSettingsEndpoint: ReturnType<
-      DeprecatedAsyncView['getEndpoints']
+      DeprecatedAsyncComponent['getEndpoints']
     >[number] = [
       'general',
       `/projects/${organization.slug}/${projectId}/performance/configure/`,
@@ -156,7 +156,7 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
     return endpoints;
   }
 
-  getRetentionPrioritiesData(...data) {
+  getRetentionPrioritiesData(...data: any) {
     return {
       dynamicSamplingBiases: Object.entries(data[1].form).map(([key, value]) => ({
         id: key,
@@ -462,6 +462,19 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
             },
           }),
       },
+      {
+        name: DetectorConfigAdmin.FUNCTION_DURATION_REGRESSION_ENABLED,
+        type: 'boolean',
+        label: t('Function Duration Regression Enabled'),
+        defaultValue: true,
+        onChange: value =>
+          this.setState({
+            performance_issue_settings: {
+              ...this.state.performance_issue__settings,
+              [DetectorConfigAdmin.FUNCTION_DURATION_REGRESSION_ENABLED]: value,
+            },
+          }),
+      },
     ];
   }
 
@@ -495,6 +508,10 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
       return fps ? `${Math.floor(fps / 5) * 5}fps` : '';
     };
 
+    const formatCount = (value: number | ''): string => {
+      return '' + value;
+    };
+
     const issueType = safeGetQsParam('issueType');
 
     return [
@@ -516,6 +533,24 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
             tickValues: [0, allowedDurationValues.length - 1],
             showTickLabels: true,
             formatLabel: formatDuration,
+            flexibleControlStateSize: true,
+            disabledReason,
+          },
+          {
+            name: DetectorConfigCustomer.N_PLUS_DB_COUNT,
+            type: 'range',
+            label: t('Minimum Query Count'),
+            defaultValue: 5,
+            help: t(
+              'Setting the value to 5 means that an eligible event will be detected as an N+1 DB Query Issue only if the number of repeated queries exceeds 5'
+            ),
+            allowedValues: allowedCountValues,
+            disabled: !(
+              hasAccess && performanceSettings[DetectorConfigAdmin.N_PLUS_DB_ENABLED]
+            ),
+            tickValues: [0, allowedCountValues.length - 1],
+            showTickLabels: true,
+            formatLabel: formatCount,
             flexibleControlStateSize: true,
             disabledReason,
           },
@@ -837,11 +872,12 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
 
     return (
       <Fragment>
+        <SentryDocumentTitle title={t('Performance')} projectSlug={project.slug} />
         <SettingsPageHeader title={t('Performance')} />
         <PermissionAlert project={project} />
         <Access access={requiredScopes} project={project}>
           {({hasAccess}) => (
-            <Feature features="organizations:starfish-browser-resource-module-image-view">
+            <Feature features="organizations:insights-initial-modules">
               <Form
                 initialData={this.state.general}
                 saveOnBlur
@@ -902,10 +938,13 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
             saveOnBlur
             allowUndo
             initialData={
-              project.dynamicSamplingBiases?.reduce((acc, bias) => {
-                acc[bias.id] = bias.active;
-                return acc;
-              }, {}) ?? {}
+              project.dynamicSamplingBiases?.reduce<Record<string, boolean>>(
+                (acc, bias) => {
+                  acc[bias.id] = bias.active;
+                  return acc;
+                },
+                {}
+              ) ?? {}
             }
             onSubmitSuccess={(response, _instance, id, change) => {
               ProjectsStore.onUpdateSuccess(response);
@@ -931,12 +970,12 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
                   disabled={!hasAccess}
                   renderFooter={() => (
                     <Actions>
-                      <Button
+                      <LinkButton
                         external
                         href="https://docs.sentry.io/product/performance/performance-at-scale/"
                       >
                         {t('Read docs')}
-                      </Button>
+                      </LinkButton>
                     </Actions>
                   )}
                 />
@@ -1004,7 +1043,7 @@ class ProjectPerformance extends DeprecatedAsyncView<Props, State> {
             apiEndpoint={performanceIssuesEndpoint}
             saveOnBlur
             onSubmitSuccess={(option: {[key: string]: number}) => {
-              const [threshold_key, threshold_value] = Object.entries(option)[0];
+              const [threshold_key, threshold_value] = Object.entries(option)[0]!;
 
               trackAnalytics(
                 'performance_views.project_issue_detection_threshold_changed',

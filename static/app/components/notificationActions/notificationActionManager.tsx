@@ -1,4 +1,4 @@
-import {Fragment, useMemo, useState} from 'react';
+import {Fragment, useEffect, useMemo, useState} from 'react';
 
 import DropdownButton from 'sentry/components/dropdownButton';
 import type {MenuItemProps} from 'sentry/components/dropdownMenu';
@@ -7,12 +7,12 @@ import NotificationActionItem from 'sentry/components/notificationActions/notifi
 import {Tooltip} from 'sentry/components/tooltip';
 import {IconAdd} from 'sentry/icons';
 import {t} from 'sentry/locale';
-import type {Project} from 'sentry/types';
 import type {
   AvailableNotificationAction,
   NotificationAction,
 } from 'sentry/types/notificationActions';
 import {NotificationActionService} from 'sentry/types/notificationActions';
+import type {Project} from 'sentry/types/project';
 import {capitalize} from 'sentry/utils/string/capitalize';
 
 type NotificationActionManagerProps = {
@@ -29,15 +29,15 @@ type NotificationActionManagerProps = {
    * TODO(enterprise): refactor to account for multiple projects
    */
   project: Project;
-  /**
-   * Updates the notification alert count for this project
-   */
-  updateAlertCount: (projectId: number, alertCount: number) => void;
   disabled?: boolean;
   /**
    * Optional list of roles to display as recipients of Sentry notifications
    */
   recipientRoles?: string[];
+  /**
+   * Updates the notification alert count for this project
+   */
+  updateAlertCount?: (projectId: number, alertCount: number) => void;
 };
 
 function NotificationActionManager({
@@ -45,18 +45,20 @@ function NotificationActionManager({
   availableActions,
   recipientRoles,
   project,
-  updateAlertCount = () => {},
   disabled = false,
 }: NotificationActionManagerProps) {
   const [notificationActions, setNotificationActions] =
     useState<Partial<NotificationAction>[]>(actions);
+
+  useEffect(() => {
+    setNotificationActions(actions);
+  }, [actions]);
 
   const removeNotificationAction = (index: number) => {
     // Removes notif action from state using the index
     const updatedActions = [...notificationActions];
     updatedActions.splice(index, 1);
     setNotificationActions(updatedActions);
-    updateAlertCount(parseInt(project.id, 10), updatedActions.length);
   };
 
   const updateNotificationAction = (index: number, updatedAction: NotificationAction) => {
@@ -111,6 +113,7 @@ function NotificationActionManager({
     };
     notificationActions.forEach((action, index) => {
       if (action.serviceType) {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         notificationActionsMap[action.serviceType].push({action, index});
       }
     });
@@ -125,7 +128,7 @@ function NotificationActionManager({
         const integrationId = service.action.integrationId;
         if (integrationId) {
           if (integrationId in integrations) {
-            integrations[integrationId].push(service);
+            integrations[integrationId]!.push(service);
           } else {
             integrations[integrationId] = [service];
           }
@@ -141,7 +144,7 @@ function NotificationActionManager({
         const integrationId = team.action.integrationId;
         if (integrationId) {
           if (integrationId in integrations) {
-            integrations[integrationId].push(team);
+            integrations[integrationId]!.push(team);
           } else {
             integrations[integrationId] = [team];
           }
@@ -156,14 +159,16 @@ function NotificationActionManager({
 
     // Renders the notif actions grouped together by kind
     return Object.keys(actionsMap).map(serviceType => {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       const services = actionsMap[serviceType];
-      return services.map(({action, index}) => (
+      return services.map(({action, index}: any) => (
         <NotificationActionItem
           key={index}
           index={index}
           defaultEdit={!action.id}
           action={action}
           recipientRoles={recipientRoles}
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           availableActions={availableServices[serviceType]}
           opsgenieIntegrations={opsgenieIntegrations}
           pagerdutyIntegrations={pagerdutyIntegrations}
@@ -205,14 +210,13 @@ function NotificationActionManager({
         label,
         onAction: () => {
           // Add notification action
-          const updatedActions = [...notificationActions, validActions[0].action];
+          const updatedActions = [...notificationActions, validActions[0]!.action];
           setNotificationActions(updatedActions);
-          updateAlertCount(parseInt(project.id, 10), updatedActions.length);
         },
       });
     });
     return dropdownMenuItems;
-  }, [actionsMap, availableServices, notificationActions, project, updateAlertCount]);
+  }, [actionsMap, availableServices, notificationActions]);
 
   let toolTipText: undefined | string = undefined;
   if (disabled) {

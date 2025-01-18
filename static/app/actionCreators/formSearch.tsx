@@ -27,12 +27,12 @@ const createSearchMap = ({
     ? formGroups.flatMap(formGroup => formGroup.fields)
     : Object.keys(fields).map(fieldName => fields[fieldName]);
 
-  return listOfFields.map(field => ({
+  return listOfFields.map<FormSearchField>(field => ({
     ...other,
     route,
-    title: typeof field !== 'function' ? field.label : undefined,
-    description: typeof field !== 'function' ? field.help : undefined,
-    field,
+    title: typeof field !== 'function' ? (field?.label as string) : undefined,
+    description: typeof field !== 'function' ? (field?.help as string) : undefined,
+    field: field!,
   }));
 };
 
@@ -42,7 +42,7 @@ export function loadSearchMap() {
   const context = require.context('../data/forms', true, /\.tsx?$/);
 
   // Get a list of all form fields defined in `../data/forms`
-  const allFormFields: FormSearchField[] = context.keys().flatMap(key => {
+  const allFormFields: FormSearchField[] = context.keys().flatMap((key: any) => {
     const mod = context(key);
 
     // Since we're dynamically importing an entire directly, there could be malformed modules defined?

@@ -1,3 +1,7 @@
+from unittest.mock import patch
+
+import orjson
+
 from fixtures.gitlab import (
     EXTERNAL_ID,
     MERGE_REQUEST_OPENED_EVENT,
@@ -6,26 +10,25 @@ from fixtures.gitlab import (
     WEBHOOK_TOKEN,
     GitLabTestCase,
 )
+from sentry.integrations.models.integration import Integration
 from sentry.models.commit import Commit
 from sentry.models.commitauthor import CommitAuthor
 from sentry.models.grouplink import GroupLink
-from sentry.models.integrations import Integration
 from sentry.models.pullrequest import PullRequest
-from sentry.silo import SiloMode
-from sentry.testutils.silo import assume_test_silo_mode, assume_test_silo_mode_of, region_silo_test
-from sentry.utils import json
+from sentry.silo.base import SiloMode
+from sentry.testutils.asserts import assert_failure_metric, assert_success_metric
+from sentry.testutils.silo import assume_test_silo_mode, assume_test_silo_mode_of
 
 
-@region_silo_test
 class WebhookTest(GitLabTestCase):
     url = "/extensions/gitlab/webhook/"
 
-    def assert_commit_author(self, author):
+    def assert_commit_author(self, author: CommitAuthor) -> None:
         assert author.email
         assert author.name
         assert author.organization_id == self.organization.id
 
-    def assert_pull_request(self, pull, author):
+    def assert_pull_request(self, pull: PullRequest, author: CommitAuthor) -> None:
         assert pull.title
         assert pull.message
         assert pull.date_added
@@ -34,7 +37,7 @@ class WebhookTest(GitLabTestCase):
         assert pull.organization_id == self.organization.id
 
     def assert_group_link(self, group, pull):
-        link = GroupLink.objects.all().first()
+        link = GroupLink.objects.get()
         assert link.group_id == group.id
         assert link.linked_type == GroupLink.LinkedType.pull_request
         assert link.linked_id == pull.id
@@ -92,7 +95,7 @@ class WebhookTest(GitLabTestCase):
         assert response.status_code == 409
         assert (
             response.reason_phrase
-            == "Gitlab's webhook secret does not match. Refresh token (or re-install the integration) by following this https://docs.sentry.io/product/integrations/integration-platform/public-integration/#refreshing-tokens."
+            == "Gitlab's webhook secret does not match. Refresh token (or re-install the integration) by following this https://docs.sentry.io/organization/integrations/integration-platform/public-integration/#refreshing-tokens."
         )
 
     def test_invalid_payload(self):
@@ -119,6 +122,23 @@ class WebhookTest(GitLabTestCase):
         # organizations sharing an integration and not having the same
         # repositories enabled.
         assert response.status_code == 204
+
+    @patch("sentry.integrations.gitlab.webhooks.PushEventWebhook.__call__")
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_push_event_failure_metric(self, mock_record, mock_event):
+        error = Exception("oops")
+        mock_event.side_effect = error
+
+        response = self.client.post(
+            self.url,
+            data=PUSH_EVENT,
+            content_type="application/json",
+            HTTP_X_GITLAB_TOKEN=WEBHOOK_TOKEN,
+            HTTP_X_GITLAB_EVENT="Push Hook",
+        )
+        assert response.status_code == 500
+
+        assert_failure_metric(mock_record, error)
 
     def test_push_event_multiple_organizations_one_missing_repo(self):
         # Create a repo on the primary organization
@@ -205,12 +225,12 @@ class WebhookTest(GitLabTestCase):
 
     def test_push_event_create_commits_with_no_author_email(self):
         repo = self.create_repo("getsentry/sentry")
-        push_event = json.loads(PUSH_EVENT)
+        push_event = orjson.loads(PUSH_EVENT)
         push_event["commits"][0]["author"]["email"] = None
 
         response = self.client.post(
             self.url,
-            data=json.dumps(push_event),
+            data=orjson.dumps(push_event),
             content_type="application/json",
             HTTP_X_GITLAB_TOKEN=WEBHOOK_TOKEN,
             HTTP_X_GITLAB_EVENT="Push Hook",
@@ -276,8 +296,28 @@ class WebhookTest(GitLabTestCase):
         assert response.status_code == 204
         assert 0 == PullRequest.objects.count()
 
-    def test_merge_event_no_last_commit(self):
-        payload = json.loads(MERGE_REQUEST_OPENED_EVENT)
+    @patch("sentry.integrations.gitlab.webhooks.MergeEventWebhook.__call__")
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_merge_event_failure_metric(self, mock_record, mock_event):
+        payload = orjson.loads(MERGE_REQUEST_OPENED_EVENT)
+
+        error = Exception("oops")
+        mock_event.side_effect = error
+
+        response = self.client.post(
+            self.url,
+            data=orjson.dumps(payload),
+            content_type="application/json",
+            HTTP_X_GITLAB_TOKEN=WEBHOOK_TOKEN,
+            HTTP_X_GITLAB_EVENT="Merge Request Hook",
+        )
+        assert response.status_code == 500
+
+        assert_failure_metric(mock_record, error)
+
+    @patch("sentry.integrations.utils.metrics.EventLifecycle.record_event")
+    def test_merge_event_no_last_commit(self, mock_record):
+        payload = orjson.loads(MERGE_REQUEST_OPENED_EVENT)
 
         # Remove required keys. There have been events in prod that are missing
         # these important attributes. GitLab docs don't explain why though.
@@ -285,13 +325,15 @@ class WebhookTest(GitLabTestCase):
 
         response = self.client.post(
             self.url,
-            data=json.dumps(payload),
+            data=orjson.dumps(payload),
             content_type="application/json",
             HTTP_X_GITLAB_TOKEN=WEBHOOK_TOKEN,
             HTTP_X_GITLAB_EVENT="Merge Request Hook",
         )
         assert response.status_code == 204
         assert 0 == PullRequest.objects.count()
+
+        assert_success_metric(mock_record)
 
     def test_merge_event_create_pull_request(self):
         self.create_repo("getsentry/sentry")
@@ -304,10 +346,10 @@ class WebhookTest(GitLabTestCase):
             HTTP_X_GITLAB_EVENT="Merge Request Hook",
         )
         assert response.status_code == 204
-        author = CommitAuthor.objects.all().first()
+        author = CommitAuthor.objects.get()
         self.assert_commit_author(author)
 
-        pull = PullRequest.objects.all().first()
+        pull = PullRequest.objects.get()
         self.assert_pull_request(pull, author)
         self.assert_group_link(group, pull)
 
@@ -330,10 +372,10 @@ class WebhookTest(GitLabTestCase):
             HTTP_X_GITLAB_EVENT="Merge Request Hook",
         )
         assert response.status_code == 204
-        author = CommitAuthor.objects.all().first()
+        author = CommitAuthor.objects.get()
         self.assert_commit_author(author)
 
-        pull = PullRequest.objects.all().first()
+        pull = PullRequest.objects.get()
         assert pull.title != "Old title"
         assert pull.message != "Old message"
 

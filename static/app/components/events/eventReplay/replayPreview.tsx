@@ -1,21 +1,24 @@
 import type {ComponentProps} from 'react';
-import {useMemo} from 'react';
+import {useEffect, useMemo} from 'react';
 import styled from '@emotion/styled';
 
 import {Alert} from 'sentry/components/alert';
 import type {LinkButton} from 'sentry/components/button';
+import {Flex} from 'sentry/components/container/flex';
 import NegativeSpaceContainer from 'sentry/components/container/negativeSpaceContainer';
+import {REPLAY_LOADING_HEIGHT} from 'sentry/components/events/eventReplay/constants';
 import {StaticReplayPreview} from 'sentry/components/events/eventReplay/staticReplayPreview';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
-import {Flex} from 'sentry/components/profiling/flex';
 import MissingReplayAlert from 'sentry/components/replays/alerts/missingReplayAlert';
 import {IconDelete} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
+import {trackAnalytics} from 'sentry/utils/analytics';
 import type {TabKey} from 'sentry/utils/replays/hooks/useActiveReplayTab';
-import useReplayReader from 'sentry/utils/replays/hooks/useReplayReader';
+import useLoadReplayReader from 'sentry/utils/replays/hooks/useLoadReplayReader';
 import type RequestError from 'sentry/utils/requestError/requestError';
 import useRouteAnalyticsParams from 'sentry/utils/routeAnalytics/useRouteAnalyticsParams';
+import useOrganization from 'sentry/utils/useOrganization';
 import type {ReplayRecord} from 'sentry/views/replays/types';
 
 type Props = {
@@ -57,10 +60,11 @@ function ReplayPreview({
   orgSlug,
   replaySlug,
 }: Props) {
-  const {fetching, replay, replayRecord, fetchError, replayId} = useReplayReader({
+  const {fetching, replay, replayRecord, fetchError, replayId} = useLoadReplayReader({
     orgSlug,
     replaySlug,
   });
+  const organization = useOrganization();
 
   const startTimestampMs = replayRecord?.started_at?.getTime() ?? 0;
   const initialTimeOffsetMs = useMemo(() => {
@@ -74,6 +78,15 @@ function ReplayPreview({
   useRouteAnalyticsParams({
     event_replay_status: getReplayAnalyticsStatus({fetchError, replayRecord}),
   });
+
+  useEffect(() => {
+    if (fetchError) {
+      trackAnalytics('replay.render-missing-replay-alert', {
+        organization,
+        surface: 'issue details - old preview',
+      });
+    }
+  }, [organization, fetchError]);
 
   if (replayRecord?.is_archived) {
     return (
@@ -92,7 +105,7 @@ function ReplayPreview({
 
   if (fetching || !replayRecord || !replay) {
     return (
-      <StyledNegativeSpaceContainer testId="replay-loading-placeholder">
+      <StyledNegativeSpaceContainer data-test-id="replay-loading-placeholder">
         <LoadingIndicator />
       </StyledNegativeSpaceContainer>
     );
@@ -112,7 +125,7 @@ function ReplayPreview({
 }
 
 const StyledNegativeSpaceContainer = styled(NegativeSpaceContainer)`
-  height: 400px;
+  height: ${REPLAY_LOADING_HEIGHT}px;
   margin-bottom: ${space(2)};
 `;
 

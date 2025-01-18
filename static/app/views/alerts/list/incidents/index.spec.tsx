@@ -1,4 +1,3 @@
-import selectEvent from 'react-select-event';
 import {IncidentFixture} from 'sentry-fixture/incident';
 import {IncidentStatsFixture} from 'sentry-fixture/incidentStats';
 import {MetricRuleFixture} from 'sentry-fixture/metricRule';
@@ -7,10 +6,11 @@ import {TeamFixture} from 'sentry-fixture/team';
 
 import {initializeOrg} from 'sentry-test/initializeOrg';
 import {act, render, screen, userEvent, within} from 'sentry-test/reactTestingLibrary';
+import selectEvent from 'sentry-test/selectEvent';
 
 import ProjectsStore from 'sentry/stores/projectsStore';
 import TeamStore from 'sentry/stores/teamStore';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
 import AlertsContainer from 'sentry/views/alerts';
 import IncidentsList from 'sentry/views/alerts/list/incidents';
 
@@ -23,7 +23,7 @@ describe('IncidentsList', () => {
   }
 
   const renderComponent = ({orgOverride}: Props = {}) => {
-    const {organization, routerContext, routerProps, router} = initializeOrg({
+    const {organization, routerProps, router} = initializeOrg({
       organization: {features: ['incidents'], ...orgOverride},
     });
 
@@ -32,7 +32,7 @@ describe('IncidentsList', () => {
         <AlertsContainer>
           <IncidentsList {...routerProps} organization={organization} />
         </AlertsContainer>,
-        {context: routerContext, organization}
+        {router, organization}
       ),
       router,
     };
@@ -89,11 +89,11 @@ describe('IncidentsList', () => {
     const items = await screen.findAllByTestId('alert-title');
 
     expect(items).toHaveLength(2);
-    expect(within(items[0]).getByText('First incident')).toBeInTheDocument();
-    expect(within(items[1]).getByText('Second incident')).toBeInTheDocument();
+    expect(within(items[0]!).getByText('First incident')).toBeInTheDocument();
+    expect(within(items[1]!).getByText('Second incident')).toBeInTheDocument();
 
     const projectBadges = screen.getAllByTestId('badge-display-name');
-    expect(within(projectBadges[0]).getByText('a')).toBeInTheDocument();
+    expect(within(projectBadges[0]!).getByText('a')).toBeInTheDocument();
   });
 
   it('displays empty state (first time experience)', async () => {

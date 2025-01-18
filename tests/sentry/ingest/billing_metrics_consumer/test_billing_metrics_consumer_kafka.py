@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import cast
 from unittest import mock
 
+import orjson
 from arroyo.backends.kafka import KafkaPayload
 from arroyo.types import BrokerValue, Message, Partition, Topic
 from django.core.cache import cache
@@ -23,7 +24,6 @@ from sentry.sentry_metrics.indexer.strings import (
 )
 from sentry.sentry_metrics.use_case_id_registry import UseCaseID
 from sentry.testutils.pytest.fixtures import django_db_all
-from sentry.utils import json
 from sentry.utils.outcomes import Outcome
 
 
@@ -206,7 +206,7 @@ def test_outcomes_consumed(track_outcome, factories):
     def generate_kafka_message(generic_metric: GenericMetric) -> Message[KafkaPayload]:
         nonlocal generate_kafka_message_counter
 
-        encoded = json.dumps(generic_metric).encode()
+        encoded = orjson.dumps(generic_metric)
         payload = KafkaPayload(key=None, value=encoded, headers=[])
         message = Message(
             BrokerValue(
@@ -266,22 +266,11 @@ def test_outcomes_consumed(track_outcome, factories):
                     category=DataCategory.TRANSACTION,
                     quantity=1,
                 ),
-                mock.call(
-                    org_id=organization.id,
-                    project_id=missing_project_id,
-                    key_id=None,
-                    outcome=Outcome.ACCEPTED,
-                    reason=None,
-                    timestamp=mock.ANY,
-                    event_id=None,
-                    category=DataCategory.PROFILE,
-                    quantity=1,
-                ),
             ]
             # We double-check that the project does not exist.
             assert not Project.objects.filter(id=2).exists()
         else:
-            assert track_outcome.mock_calls[3:] == [
+            assert track_outcome.mock_calls[2:] == [
                 mock.call(
                     org_id=organization.id,
                     project_id=project_2.id,

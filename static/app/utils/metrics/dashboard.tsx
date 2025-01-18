@@ -1,52 +1,38 @@
 import {urlEncode} from '@sentry/utils';
 
-import type {MRI, PageFilters} from 'sentry/types';
-import {emptyWidget, NO_QUERY_ID} from 'sentry/utils/metrics/constants';
-import {MRIToField, parseField} from 'sentry/utils/metrics/mri';
-import type {MetricsQuery, MetricWidgetQueryParams} from 'sentry/utils/metrics/types';
-import {MetricDisplayType} from 'sentry/utils/metrics/types';
-import type {Widget} from 'sentry/views/dashboards/types';
-import {
-  DashboardWidgetSource,
-  DisplayType,
-  WidgetType,
-} from 'sentry/views/dashboards/types';
+import type {PageFilters} from 'sentry/types/core';
+import {defined} from 'sentry/utils';
+import {MRIToField} from 'sentry/utils/metrics/mri';
+import type {MetricDisplayType, MetricsQuery} from 'sentry/utils/metrics/types';
+import type {Widget, WidgetQuery} from 'sentry/views/dashboards/types';
+import {DisplayType, WidgetType} from 'sentry/views/dashboards/types';
+
+interface QueryParams extends MetricsQuery {
+  id?: number;
+  isHidden?: boolean;
+}
+
+interface EquationParams {
+  formula: string;
+  isHidden?: boolean;
+}
 
 export function convertToDashboardWidget(
-  metricQueries: MetricsQuery[],
+  metricQueries: (QueryParams | EquationParams)[],
   displayType?: MetricDisplayType,
   title = ''
 ): Widget {
-  // @ts-expect-error TODO: pass interval
+  // TODO: Ged rid of ts-expect-error
+  // @ts-ignore TS(2741): Property 'interval' is missing in type '{ title: s... Remove this comment to see the full error message
   return {
     title,
     displayType: toDisplayType(displayType),
     widgetType: WidgetType.METRICS,
     limit: 10,
-    queries: metricQueries.map(getWidgetQuery),
+    queries: metricQueries.map(query =>
+      'formula' in query ? getWidgetEquation(query) : getWidgetQuery(query)
+    ),
   };
-}
-
-export function convertToMetricWidget(widget: Widget): MetricWidgetQueryParams[] {
-  return widget.queries.map(query => {
-    const parsed = parseField(query.aggregates[0]) || {mri: '' as MRI, op: ''};
-
-    return {
-      id: NO_QUERY_ID,
-      mri: parsed.mri,
-      op: parsed.op,
-      query: query.conditions,
-      groupBy: query.columns,
-      displayType: toMetricDisplayType(widget.displayType),
-    };
-  });
-}
-
-export function toMetricDisplayType(displayType: unknown): MetricDisplayType {
-  if (Object.values(MetricDisplayType).includes(displayType as MetricDisplayType)) {
-    return displayType as MetricDisplayType;
-  }
-  return MetricDisplayType.LINE;
 }
 
 export function toDisplayType(displayType: unknown): DisplayType {
@@ -56,27 +42,34 @@ export function toDisplayType(displayType: unknown): DisplayType {
   return DisplayType.LINE;
 }
 
-export function defaultMetricWidget(selection: PageFilters) {
-  return convertToDashboardWidget(
-    [{...selection, ...emptyWidget}],
-    MetricDisplayType.LINE
-  );
-}
-
-export function getWidgetQuery(metricsQuery: MetricsQuery) {
-  const field = MRIToField(metricsQuery.mri, metricsQuery.op || '');
-
+export function getWidgetQuery(metricsQuery: QueryParams): WidgetQuery {
+  const field = MRIToField(metricsQuery.mri, metricsQuery.aggregation);
   return {
-    name: '',
+    name: defined(metricsQuery.id) ? `${metricsQuery.id}` : '',
     aggregates: [field],
     columns: metricsQuery.groupBy ?? [],
     fields: [field],
     conditions: metricsQuery.query ?? '',
-    orderby: '',
+    // @ts-ignore TS(2322): Type 'undefined' is not assignable to type 'string... Remove this comment to see the full error message
+    orderby: undefined,
+    isHidden: metricsQuery.isHidden,
   };
 }
 
-export function encodeWidgetQuery(query) {
+export function getWidgetEquation(equation: EquationParams): WidgetQuery {
+  return {
+    name: '',
+    aggregates: [`equation|${equation.formula}`],
+    columns: [],
+    fields: [`equation|${equation.formula}`],
+    conditions: '',
+    // @ts-ignore TS(2322): Type 'undefined' is not assignable to type 'string... Remove this comment to see the full error message
+    orderby: undefined,
+    isHidden: equation.isHidden,
+  };
+}
+
+export function encodeWidgetQuery(query: any) {
   return urlEncode({
     ...query,
     aggregates: query.aggregates.join(','),
@@ -94,7 +87,6 @@ export function getWidgetAsQueryParams(
   const {projects} = selection;
 
   return {
-    source: DashboardWidgetSource.DDM,
     start,
     end,
     statsPeriod: period,

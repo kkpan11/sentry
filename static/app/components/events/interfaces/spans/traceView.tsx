@@ -1,9 +1,9 @@
-import {createRef, memo, useEffect, useState} from 'react';
+import {memo, useEffect, useRef, useState} from 'react';
 import {Observer} from 'mobx-react';
 
 import EmptyStateWarning from 'sentry/components/emptyStateWarning';
 import {t} from 'sentry/locale';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
 import type {TracePerformanceIssue} from 'sentry/utils/performance/quickTrace/types';
 
 import * as CursorGuideHandler from './cursorGuideHandler';
@@ -26,10 +26,10 @@ type Props = {
 };
 
 function TraceView(props: Props) {
-  const traceViewRef = createRef<HTMLDivElement>();
-  const traceViewHeaderRef = createRef<HTMLDivElement>();
-  const virtualScrollBarContainerRef = createRef<HTMLDivElement>();
-  const minimapInteractiveRef = createRef<HTMLDivElement>();
+  const traceViewRef = useRef<HTMLDivElement>(null);
+  const traceViewHeaderRef = useRef<HTMLDivElement>(null);
+  const virtualScrollBarContainerRef = useRef<HTMLDivElement>(null);
+  const minimapInteractiveRef = useRef<HTMLDivElement>(null);
 
   const [isMounted, setIsMounted] = useState(false);
 
@@ -67,6 +67,7 @@ function TraceView(props: Props) {
               viewStart: 0,
               viewEnd: 1,
             })}
+            isEmbedded={!!props.isEmbedded}
           />
         );
       }}
@@ -141,6 +142,7 @@ function TraceView(props: Props) {
                                       operationNameFilters={
                                         waterfallModel.operationNameFilters
                                       }
+                                      isEmbedded={!!isEmbedded}
                                     />
                                   )}
                                 </Observer>

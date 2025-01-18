@@ -9,48 +9,13 @@ import Placeholder from 'sentry/components/placeholder';
 import {useReplayContext} from 'sentry/components/replays/replayContext';
 import ReplayTagsTableRow from 'sentry/components/replays/replayTagsTableRow';
 import {t} from 'sentry/locale';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 import useOrganization from 'sentry/utils/useOrganization';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
 import FluidHeight from 'sentry/views/replays/detail/layout/fluidHeight';
 import FluidPanel from 'sentry/views/replays/detail/layout/fluidPanel';
 import TabItemContainer from 'sentry/views/replays/detail/tabItemContainer';
 import TagFilters from 'sentry/views/replays/detail/tagPanel/tagFilters';
 import useTagFilters from 'sentry/views/replays/detail/tagPanel/useTagFilters';
-
-const notTags = [
-  'browser.name',
-  'browser.version',
-  'device.brand',
-  'device.family',
-  'device.model_id',
-  'device.name',
-  'platform',
-  'releases',
-  'replayType',
-  'os.name',
-  'os.version',
-  'sdk.name',
-  'sdk.version',
-  'user.email',
-  'user.username',
-  // TODO(replay): Remove this when backend changes `name` -> `username`
-  'user.name',
-  'user.id',
-  'user.ip',
-];
-const notSearchable = [
-  'sdk.blockAllMedia',
-  'sdk.errorSampleRate ',
-  'sdk.maskAllInputs',
-  'sdk.maskAllText',
-  'sdk.networkCaptureBodies',
-  'sdk.networkDetailHasUrls',
-  'sdk.networkRequestHasHeaders',
-  'sdk.networkResponseHasHeaders',
-  'sdk.sessionSampleRate',
-  'sdk.useCompression',
-  'sdk.useCompressionOption',
-];
 
 function TagPanel() {
   const organization = useOrganization();
@@ -63,7 +28,12 @@ function TagPanel() {
     const unorderedTags = {
       ...tags,
       ...Object.fromEntries(
-        Object.entries(sdkOptions ?? {}).map(([key, value]) => ['sdk.' + key, [value]])
+        Object.entries(sdkOptions ?? {}).map(
+          ([key, value]) =>
+            key === 'name' || key === 'version'
+              ? ['sdk.' + key, [value]]
+              : ['sdk.replay.' + key, [value]] // specify tags from the replay sdk; these tags are not searchable
+        )
       ),
     };
 
@@ -71,6 +41,7 @@ function TagPanel() {
     const sortedTags = Object.keys(unorderedTags)
       .sort()
       .reduce((acc, key) => {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         acc[key] = unorderedTags[key];
         return acc;
       }, {});
@@ -85,9 +56,8 @@ function TagPanel() {
     (name: string, value: ReactNode): LocationDescriptor => ({
       pathname: normalizeUrl(`/organizations/${organization.slug}/replays/`),
       query: {
-        query: notTags.includes(name)
-          ? `${name}:"${value}"`
-          : `tags["${name}"]:"${value}"`,
+        // The replay index endpoint treats unknown filters as tags, by default. Therefore we don't need the tags[] syntax, whether `name` is a tag or not.
+        query: `${name}:"${value}"`,
       },
     }),
     [organization.slug]
@@ -111,7 +81,7 @@ function TagPanel() {
                     key={key}
                     name={key}
                     values={values}
-                    generateUrl={notSearchable.includes(key) ? undefined : generateUrl}
+                    generateUrl={key.includes('sdk.replay.') ? undefined : generateUrl}
                   />
                 ))}
               </KeyValueTable>

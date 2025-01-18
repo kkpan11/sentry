@@ -1,9 +1,11 @@
-import type {MetricMeta, MRI} from 'sentry/types';
+import {OrganizationFixture} from 'sentry-fixture/organization';
+
+import type {MetricMeta, MRI} from 'sentry/types/metrics';
 import type {ImportDashboard, ImportWidget} from 'sentry/utils/metrics/dashboardImport';
 import {parseDashboard, WidgetParser} from 'sentry/utils/metrics/dashboardImport';
 import {parseMRI} from 'sentry/utils/metrics/mri';
 
-const mockRequests = (queryStrings: string[]) => {
+const mockRequests = (queryStrings: string[], overrideFormulas: any[] = []) => {
   const queries = queryStrings.map((queryStr, i) => {
     return {
       data_source: 'metrics',
@@ -19,7 +21,7 @@ const mockRequests = (queryStrings: string[]) => {
 
   return [
     {
-      formulas,
+      formulas: [...formulas, ...overrideFormulas],
       queries,
       response_format: 'timeseries',
       style: {line_type: 'solid'},
@@ -47,6 +49,7 @@ const mockAvailableMetrics = (mris: MRI[]): MetricMeta[] => {
     mri,
     operations: [],
     blockingStatus: [],
+    projectIds: [],
   })) as MetricMeta[];
 };
 
@@ -55,7 +58,7 @@ describe('WidgetParser', () => {
     jest.clearAllMocks();
     MockApiClient.clearMockResponses();
     MockApiClient.addMockResponse({
-      url: '/organizations/sentry/metrics/tags/',
+      url: '/organizations/test-org/metrics/tags/',
       method: 'GET',
       body: [
         {key: 'foo', name: 'foo'},
@@ -73,10 +76,15 @@ describe('WidgetParser', () => {
   it('should parse a widget with single timeseries', async () => {
     const widgetToImport = mockWidget();
 
-    const result = new WidgetParser(widgetToImport, availableMetrics).parse();
+    const result = new WidgetParser(
+      widgetToImport,
+      availableMetrics,
+      'test-org',
+      false
+    ).parse();
     const {report, widget} = await result;
 
-    expect(report.outcome).toEqual('success');
+    expect(report.outcome).toBe('success');
     expect(report.errors).toEqual([]);
 
     expect(widget).toBeDefined();
@@ -90,7 +98,7 @@ describe('WidgetParser', () => {
           conditions: 'foo:bar',
           columns: ['baz'],
           name: '',
-          orderby: '',
+          orderby: undefined,
         },
       ],
       title: 'Test widget',
@@ -105,10 +113,15 @@ describe('WidgetParser', () => {
         'sum:sentry.bar.baz{}',
       ]),
     });
-    const result = new WidgetParser(widgetToImport, availableMetrics).parse();
+    const result = new WidgetParser(
+      widgetToImport,
+      availableMetrics,
+      'test-org',
+      false
+    ).parse();
     const {report, widget} = await result;
 
-    expect(report.outcome).toEqual('success');
+    expect(report.outcome).toBe('success');
     expect(report.errors).toEqual([]);
 
     expect(widget?.queries).toHaveLength(2);
@@ -125,7 +138,7 @@ describe('WidgetParser', () => {
           columns: ['baz'],
           fields: ['sum(c:custom/sentry.foo.bar@none)'],
           conditions: 'foo:bar',
-          orderby: '',
+          orderby: undefined,
         },
         {
           name: '',
@@ -133,7 +146,7 @@ describe('WidgetParser', () => {
           columns: [],
           fields: ['sum(c:custom/sentry.bar.baz@none)'],
           conditions: '',
-          orderby: '',
+          orderby: undefined,
         },
       ],
     });
@@ -144,10 +157,15 @@ describe('WidgetParser', () => {
       requests: mockRequests(['sum:sentry.foo.bar.avg{foo:bar} by {baz}']),
     });
 
-    const result = new WidgetParser(widgetToImport, availableMetrics).parse();
+    const result = new WidgetParser(
+      widgetToImport,
+      availableMetrics,
+      'test-org',
+      false
+    ).parse();
     const {report, widget} = await result;
 
-    expect(report.outcome).toEqual('success');
+    expect(report.outcome).toBe('success');
     expect(widget).toEqual({
       displayType: 'line',
       limit: 10,
@@ -158,7 +176,7 @@ describe('WidgetParser', () => {
           conditions: 'foo:bar',
           columns: ['baz'],
           name: '',
-          orderby: '',
+          orderby: undefined,
         },
       ],
       title: 'Test widget',
@@ -171,10 +189,15 @@ describe('WidgetParser', () => {
       requests: mockRequests(['sum:sentry.unknown-metric{foo:bar} by {baz}']),
     });
 
-    const result = new WidgetParser(widgetToImport, availableMetrics).parse();
+    const result = new WidgetParser(
+      widgetToImport,
+      availableMetrics,
+      'test-org',
+      false
+    ).parse();
     const {report} = await result;
 
-    expect(report.outcome).toEqual('error');
+    expect(report.outcome).toBe('error');
     expect(report.errors).toEqual([
       'widget - no parseable queries found',
       'widget.request.query - metric not found: sentry.unknown-metric',
@@ -186,10 +209,10 @@ describe('WidgetParser', () => {
       requests: mockRequests(['sum:sentry.foo.bar{not-a-tag:bar} by {baz}']),
     });
 
-    const result = new WidgetParser(widget, availableMetrics).parse();
+    const result = new WidgetParser(widget, availableMetrics, 'test-org', false).parse();
     const {report} = await result;
 
-    expect(report.outcome).toEqual('warning');
+    expect(report.outcome).toBe('warning');
     expect(report.errors).toEqual([
       'widget.request.query - unsupported filter: not-a-tag',
     ]);
@@ -200,10 +223,10 @@ describe('WidgetParser', () => {
       requests: mockRequests(['sum:sentry.foo.bar{foo:bar*} by {baz}']),
     });
 
-    const result = new WidgetParser(widget, availableMetrics).parse();
+    const result = new WidgetParser(widget, availableMetrics, 'test-org', false).parse();
     const {report} = await result;
 
-    expect(report.outcome).toEqual('warning');
+    expect(report.outcome).toBe('warning');
     expect(report.errors).toEqual([
       'widget.request.query.filter - unsupported value: bar*, using bar',
     ]);
@@ -215,7 +238,7 @@ describe('parseDashboard', () => {
     jest.clearAllMocks();
     MockApiClient.clearMockResponses();
     MockApiClient.addMockResponse({
-      url: '/organizations/sentry/metrics/tags/',
+      url: '/organizations/test-org/metrics/tags/',
       method: 'GET',
       body: [
         {key: 'foo', name: 'foo'},
@@ -238,12 +261,16 @@ describe('parseDashboard', () => {
       widgets: [mockWidget(), mockWidget()],
     } as ImportDashboard;
 
-    const result = await parseDashboard(dashboard, availableMetrics);
+    const result = await parseDashboard(
+      dashboard,
+      availableMetrics,
+      OrganizationFixture({slug: 'test-org'})
+    );
     const {report, widgets} = result;
 
-    expect(report.length).toEqual(2);
-    expect(report[0].outcome).toEqual('success');
-    expect(widgets.length).toEqual(2);
+    expect(report).toHaveLength(2);
+    expect(report[0]!.outcome).toBe('success');
+    expect(widgets).toHaveLength(2);
   });
 
   it('should parse a dashboard and explode widgets', async () => {
@@ -254,21 +281,62 @@ describe('parseDashboard', () => {
       widgets: [
         mockWidget(),
         mockWidget({
-          definition: {
-            title: 'Test widget 2',
-            legend_columns: ['avg', 'min', 'max', 'value', 'sum'],
-            type: 'timeseries',
-            requests: mockRequests(['sum:sentry.bar.baz{}', 'sum:sentry.foo.bar{}']),
-          },
+          title: 'Test widget 2',
+          legend_columns: ['avg', 'min', 'max', 'value', 'sum'],
+          type: 'timeseries',
+          requests: mockRequests(['sum:sentry.bar.baz{}', 'sum:sentry.foo.bar{}']),
         }),
       ],
     } as ImportDashboard;
 
-    const result = await parseDashboard(dashboard, availableMetrics);
+    const result = await parseDashboard(
+      dashboard,
+      availableMetrics,
+      OrganizationFixture({slug: 'test-org'})
+    );
     const {report, widgets} = result;
 
-    expect(report.length).toEqual(2);
-    expect(report[0].outcome).toEqual('success');
-    expect(widgets.length).toEqual(2);
+    expect(report).toHaveLength(2);
+    expect(report[0]!.outcome).toBe('success');
+    expect(widgets).toHaveLength(2);
+  });
+
+  it('should parse a dashboard with formulas', async () => {
+    const dashboard = {
+      id: 1,
+      title: 'Test dashboard',
+      description: 'Test description',
+      widgets: [
+        mockWidget({
+          title: 'Formula Test widget 2',
+          legend_columns: ['avg', 'min', 'max', 'value', 'sum'],
+          type: 'timeseries',
+          requests: mockRequests(
+            ['sum:sentry.bar.baz{}', 'sum:sentry.foo.bar{}'],
+            [
+              {formula: '2 * query1'},
+              {formula: 'query0 + query1'},
+              {formula: '(query1 + query1) - query0'},
+            ]
+          ),
+        }),
+      ],
+    } as ImportDashboard;
+
+    const result = await parseDashboard(
+      dashboard,
+      availableMetrics,
+      OrganizationFixture({slug: 'test-org'})
+    );
+
+    const {report, widgets} = result;
+    expect(report).toHaveLength(1);
+    expect(widgets).toHaveLength(1);
+
+    const queries = widgets[0]!.queries;
+    expect(queries).toHaveLength(5);
+    expect(queries[2]!.aggregates[0]).toBe('equation|2 * $b');
+    expect(queries[3]!.aggregates[0]).toBe('equation|$a + $b');
+    expect(queries[4]!.aggregates[0]).toBe('equation|($b + $b) - $a');
   });
 });

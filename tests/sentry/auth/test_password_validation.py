@@ -7,8 +7,8 @@ from pytest import raises
 
 from sentry.auth.password_validation import validate_password
 from sentry.conf.server import AUTH_PASSWORD_VALIDATORS
-from sentry.models.user import User
 from sentry.testutils.cases import TestCase
+from sentry.users.models.user import User
 
 PWNED_PASSWORDS_RESPONSE_MOCK = """4145D488EF49819E75E71019A6E8EA21905:1
 4186AA7593257C23D6A76D99FBEB3D3FEAF:2
@@ -84,10 +84,7 @@ class PasswordValidationTestCase(TestCase):
             "https://api.pwnedpasswords.com/range/74BA3",
             body=PWNED_PASSWORDS_RESPONSE_MOCK,
         )
-        try:
-            validate_password("hiphophouse")
-        except ValidationError:
-            assert False, "ValidationError was thrown"
+        validate_password("hiphophouse")  # should not raise
 
     @responses.activate
     @override_settings(
@@ -101,7 +98,4 @@ class PasswordValidationTestCase(TestCase):
             "https://api.pwnedpasswords.com/range/74BA3",
             body="corrupted_content_with_no_colon",
         )
-        try:
-            validate_password("hiphophouse")
-        except ValidationError:
-            assert False, "ValidationError was thrown"
+        validate_password("hiphophouse")  # should not raise

@@ -1,7 +1,6 @@
 import {MembersFixture} from 'sentry-fixture/members';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 import {ProjectFixture} from 'sentry-fixture/project';
-import {RouterContextFixture} from 'sentry-fixture/routerContextFixture';
 import {RouterFixture} from 'sentry-fixture/routerFixture';
 import {TeamFixture} from 'sentry-fixture/team';
 
@@ -89,13 +88,9 @@ describe('Command Palette Modal', function () {
         Footer={ModalFooter}
       />,
       {
-        context: RouterContextFixture([
-          {
-            router: RouterFixture({
-              params: {orgId: 'org-slug'},
-            }),
-          },
-        ]),
+        router: RouterFixture({
+          params: {orgId: 'org-slug'},
+        }),
       }
     );
 
@@ -118,7 +113,7 @@ describe('Command Palette Modal', function () {
     expect(badges[0]).toHaveTextContent('billy-org Dashboard');
     expect(badges[1]).toHaveTextContent('billy-org Settings');
 
-    await userEvent.click(badges[0]);
+    await userEvent.click(badges[0]!);
 
     expect(navigateTo).toHaveBeenCalledWith('/billy-org/', expect.anything(), undefined);
   });

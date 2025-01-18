@@ -4,15 +4,15 @@ import styled from '@emotion/styled';
 import moment from 'moment-timezone';
 
 import CollapsePanel from 'sentry/components/collapsePanel';
-import DateTime from 'sentry/components/dateTime';
+import {DateTime} from 'sentry/components/dateTime';
 import Duration from 'sentry/components/duration';
 import Link from 'sentry/components/links/link';
-import PanelTable from 'sentry/components/panels/panelTable';
-import StatusIndicator from 'sentry/components/statusIndicator';
+import {PanelTable} from 'sentry/components/panels/panelTable';
+import {StatusIndicator} from 'sentry/components/statusIndicator';
 import {t, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
-import {getDuration} from 'sentry/utils/formatters';
+import type {Organization} from 'sentry/types/organization';
+import getDuration from 'sentry/utils/duration/getDuration';
 import getDynamicText from 'sentry/utils/getDynamicText';
 import {capitalize} from 'sentry/utils/string/capitalize';
 import useOrganization from 'sentry/utils/useOrganization';
@@ -95,7 +95,7 @@ function MetricAlertActivity({organization, incident}: MetricAlertActivityProps)
             )}
             {COMPARISON_DELTA_OPTIONS.find(
               ({value}) => value === incident.alertRule.comparisonDelta
-            )?.label ?? COMPARISON_DELTA_OPTIONS[0].label}
+            )?.label ?? COMPARISON_DELTA_OPTIONS[0]?.label}
           </Fragment>
         ) : (
           <Fragment>

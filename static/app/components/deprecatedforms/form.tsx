@@ -10,6 +10,7 @@ import {t} from 'sentry/locale';
 
 type FormProps = {
   cancelLabel?: string;
+  children?: React.ReactNode;
   className?: string;
   errorMessage?: React.ReactNode;
   extraButton?: React.ReactNode;
@@ -96,7 +97,7 @@ class Form<
     this.props.onSubmitSuccess?.(data);
   };
 
-  onSubmitError = error => {
+  onSubmitError = (error: any) => {
     this.setState({
       state: FormState.ERROR,
       errors: error.responseJSON,
@@ -135,7 +136,7 @@ class Form<
         <StyledForm
           onSubmit={this.onSubmit}
           className={this.props.className}
-          aria-label={this.props['aria-label']}
+          aria-label={(this.props as any)['aria-label']}
         >
           {isError && !hideErrors && (
             <div className="alert alert-error alert-block">
@@ -148,7 +149,8 @@ class Form<
                   </p>
                   <ul>
                     {nonFieldErrors.map((e, i) => (
-                      <li key={i}>{e}</li>
+                      // TODO(TS): Objects cannot be rendered to dom
+                      <li key={i}>{e as any}</li>
                     ))}
                   </ul>
                 </div>

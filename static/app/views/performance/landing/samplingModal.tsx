@@ -10,7 +10,8 @@ import RadioGroup from 'sentry/components/forms/controls/radioGroup';
 import Link from 'sentry/components/links/link';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import type EventView from 'sentry/utils/discover/eventView';
 
 type Props = {
@@ -31,7 +32,7 @@ function SamplingModal(props: Props) {
     ['false', t('Always show sampled data')],
   ];
 
-  const [choice, setChoice] = useState(choices[isMEPEnabled ? 0 : 1][0]);
+  const [choice, setChoice] = useState(choices[isMEPEnabled ? 0 : 1]![0]!);
 
   return (
     <Fragment>

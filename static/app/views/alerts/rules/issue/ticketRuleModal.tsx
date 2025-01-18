@@ -1,15 +1,17 @@
 import styled from '@emotion/styled';
 
 import {addSuccessMessage} from 'sentry/actionCreators/indicator';
+import type DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
 import type {ExternalIssueFormErrors} from 'sentry/components/externalIssues/abstractExternalIssueForm';
 import AbstractExternalIssueForm from 'sentry/components/externalIssues/abstractExternalIssueForm';
 import type {FormProps} from 'sentry/components/forms/form';
 import ExternalLink from 'sentry/components/links/externalLink';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Choices, IssueConfigField, Organization} from 'sentry/types';
 import type {IssueAlertRuleAction} from 'sentry/types/alerts';
-import type DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
+import type {Choices} from 'sentry/types/core';
+import type {IssueConfigField} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
 
 const IGNORED_FIELDS = ['Sprint'];
 
@@ -49,13 +51,14 @@ class TicketRuleModal extends AbstractExternalIssueForm<Props, State> {
     };
   }
 
-  getEndpoints(): ReturnType<DeprecatedAsyncView['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {instance} = this.props;
     const query = (instance.dynamic_form_fields || [])
       .filter(field => field.updatesForm)
       .filter(field => instance.hasOwnProperty(field.name))
       .reduce(
         (accumulator, {name}) => {
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           accumulator[name] = instance[name];
           return accumulator;
         },
@@ -176,16 +179,24 @@ class TicketRuleModal extends AbstractExternalIssueForm<Props, State> {
         const prevChoice = instance?.[field.name];
         // Note that field.choices is an array of tuples, where each tuple
         // contains a numeric id and string label, eg. ("10000", "EX") or ("1", "Bug")
-        if (
-          prevChoice && field.choices && Array.isArray(prevChoice)
-            ? // Multi-select fields have an array of values, eg: ['a', 'b'] so we
-              // check that every value exists in choices
-              prevChoice.every(value => field.choices?.some(tuple => tuple[0] === value))
+
+        if (!prevChoice) {
+          return field;
+        }
+
+        let shouldDefaultChoice = true;
+
+        if (field.choices) {
+          shouldDefaultChoice = !!(Array.isArray(prevChoice)
+            ? prevChoice.every(value => field.choices?.some(tuple => tuple[0] === value))
             : // Single-select fields have a single value, eg: 'a'
-              field.choices?.some(item => item[0] === prevChoice)
-        ) {
+              field.choices?.some(item => item[0] === prevChoice));
+        }
+
+        if (shouldDefaultChoice) {
           field.default = prevChoice;
         }
+
         return field;
       });
     return [...fields, ...cleanedFields];

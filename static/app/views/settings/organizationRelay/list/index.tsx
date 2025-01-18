@@ -1,6 +1,6 @@
 import orderBy from 'lodash/orderBy';
 
-import type {Relay, RelayActivity} from 'sentry/types';
+import type {Relay, RelayActivity} from 'sentry/types/relay';
 
 import ActivityList from './activityList';
 import CardHeader from './cardHeader';
@@ -34,7 +34,7 @@ function List({relays, relayActivities, onRefresh, onDelete, onEdit, disabled}: 
     <div>
       {Object.keys(relaysByPublicKey).map(relayByPublicKey => {
         const {name, description, created, activities} =
-          relaysByPublicKey[relayByPublicKey];
+          relaysByPublicKey[relayByPublicKey]!;
         return (
           <div key={relayByPublicKey}>
             <CardHeader

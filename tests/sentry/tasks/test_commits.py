@@ -11,14 +11,14 @@ from sentry.models.latestreporeleaseenvironment import LatestRepoReleaseEnvironm
 from sentry.models.release import Release
 from sentry.models.releaseheadcommit import ReleaseHeadCommit
 from sentry.models.repository import Repository
-from sentry.silo import SiloMode
+from sentry.silo.base import SiloMode
 from sentry.tasks.commits import fetch_commits, handle_invalid_identity
 from sentry.testutils.cases import TestCase
-from sentry.testutils.silo import assume_test_silo_mode, control_silo_test, region_silo_test
+from sentry.testutils.helpers.features import apply_feature_flag_on_cls
+from sentry.testutils.silo import assume_test_silo_mode, control_silo_test
 from social_auth.models import UserSocialAuth
 
 
-@region_silo_test
 class FetchCommitsTest(TestCase):
     def _test_simple_action(self, user, org):
         repo = Repository.objects.create(name="example", provider="dummy", organization_id=org.id)
@@ -83,14 +83,6 @@ class FetchCommitsTest(TestCase):
         )
         Repository.objects.create(name="example", provider="dummy", organization_id=org.id)
         self._test_simple_action(user=self.user, org=org)
-
-    def test_simple_owner_from_team(self):
-        user = self.create_user()
-        self.login_as(user=user)
-        org = self.create_organization(name="baz")
-        owner_team = self.create_team(organization=org, org_role="owner")
-        self.create_member(organization=org, user=user, teams=[owner_team])
-        self._test_simple_action(user=user, org=org)
 
     def test_release_locked(self):
         self.login_as(user=self.user)
@@ -295,6 +287,11 @@ class FetchCommitsTest(TestCase):
         assert msg.subject == "Unable to Fetch Commits"
         assert msg.to == [self.user.email]
         assert "Repository not found" in msg.body
+
+
+@apply_feature_flag_on_cls("organizations:set-commits-updated")
+class FetchCommitsTestUpdated(FetchCommitsTest):
+    pass
 
 
 @control_silo_test

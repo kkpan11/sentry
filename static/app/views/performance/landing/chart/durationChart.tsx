@@ -10,7 +10,7 @@ import Placeholder from 'sentry/components/placeholder';
 import QuestionTooltip from 'sentry/components/questionTooltip';
 import {IconWarning} from 'sentry/icons';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
 import {getUtcToLocalDateObject} from 'sentry/utils/dates';
 import type EventView from 'sentry/utils/discover/eventView';
 import getDynamicText from 'sentry/utils/getDynamicText';
@@ -19,7 +19,8 @@ import {useLocation} from 'sentry/utils/useLocation';
 
 import Chart from '../../charts/chart';
 import {DoubleHeaderContainer} from '../../styles';
-import {getFieldOrBackup} from '../display/utils';
+
+import {getFieldOrBackup} from './utils';
 
 type Props = {
   eventView: EventView;

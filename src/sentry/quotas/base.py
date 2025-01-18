@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from typing import TYPE_CHECKING, Any, Literal
@@ -9,12 +10,17 @@ from django.core.cache import cache
 
 from sentry import features, options
 from sentry.constants import DataCategory
+from sentry.sentry_metrics.use_case_id_registry import CARDINALITY_LIMIT_USE_CASES
 from sentry.utils.json import prune_empty_keys
 from sentry.utils.services import Service
 
 if TYPE_CHECKING:
+    from sentry.models.organization import Organization
     from sentry.models.project import Project
+    from sentry.models.projectkey import ProjectKey
     from sentry.monitors.models import Monitor
+    from sentry.profiles.utils import Profile
+    from sentry.quotas.types import SeatObject
 
 
 @unique
@@ -28,6 +34,9 @@ class QuotaScope(IntEnum):
         return self.name.lower()
 
 
+AbuseQuotaScope = Literal[QuotaScope.ORGANIZATION, QuotaScope.PROJECT, QuotaScope.GLOBAL]
+
+
 @dataclass
 class AbuseQuota:
     # Quota Id.
@@ -37,13 +46,48 @@ class AbuseQuota:
     # Quota categories.
     categories: list[DataCategory]
     # Quota Scope.
-    scope: Literal[QuotaScope.ORGANIZATION, QuotaScope.PROJECT, QuotaScope.GLOBAL]
+    scope: AbuseQuotaScope
+    # The optional namespace that the quota belongs to.
+    namespace: str | None = None
     # Old org option name still used for compatibility reasons,
     # takes precedence over `option` and `compat_option_sentry`.
     compat_option_org: str | None = None
     # Old Sentry option name still used for compatibility reasons,
     # takes precedence over `option`.
     compat_option_sentry: str | None = None
+
+
+def build_metric_abuse_quotas() -> list[AbuseQuota]:
+    quotas = list()
+
+    scopes: list[tuple[AbuseQuotaScope, str]] = [
+        (QuotaScope.PROJECT, "p"),
+        (QuotaScope.ORGANIZATION, "o"),
+        (QuotaScope.GLOBAL, "g"),
+    ]
+
+    for scope, prefix in scopes:
+        quotas.append(
+            AbuseQuota(
+                id=f"{prefix}amb",
+                option=f"metric-abuse-quota.{scope.api_name()}",
+                categories=[DataCategory.METRIC_BUCKET],
+                scope=scope,
+            )
+        )
+
+        for use_case in CARDINALITY_LIMIT_USE_CASES:
+            quotas.append(
+                AbuseQuota(
+                    id=f"{prefix}amb_{use_case.value}",
+                    option=f"metric-abuse-quota.{scope.api_name()}.{use_case.value}",
+                    categories=[DataCategory.METRIC_BUCKET],
+                    scope=scope,
+                    namespace=use_case.value,
+                )
+            )
+
+    return quotas
 
 
 class QuotaConfig:
@@ -84,7 +128,16 @@ class QuotaConfig:
                         since unlimited quotas can never be exceeded.
     """
 
-    __slots__ = ["id", "categories", "scope", "scope_id", "limit", "window", "reason_code"]
+    __slots__ = [
+        "id",
+        "categories",
+        "scope",
+        "scope_id",
+        "limit",
+        "window",
+        "reason_code",
+        "namespace",
+    ]
 
     def __init__(
         self,
@@ -95,6 +148,7 @@ class QuotaConfig:
         limit: int | None = None,
         window=None,
         reason_code=None,
+        namespace=None,
     ):
         if limit is not None:
             assert reason_code, "reason code required for fallible quotas"
@@ -120,6 +174,7 @@ class QuotaConfig:
         self.limit = limit
         self.window = window
         self.reason_code = reason_code
+        self.namespace = namespace
 
     @property
     def should_track(self):
@@ -141,6 +196,7 @@ class QuotaConfig:
             "categories": categories,
             "limit": self.limit,
             "window": self.window,
+            "namespace": self.namespace,
             "reasonCode": self.reason_code,
         }
 
@@ -205,10 +261,14 @@ class SeatAssignmentResult:
     """
     Can the seat assignment be made?
     """
-    reason: str | None = None
+    reason: str = ""
     """
     The human readable reason the assignment can be made or not.
     """
+
+    def __post_init__(self) -> None:
+        if not self.assignable and not self.reason:
+            raise ValueError("`reason` must be specified when not assignable")
 
 
 def index_data_category(event_type: str | None, organization) -> DataCategory:
@@ -258,7 +318,12 @@ class Quota(Service):
     def __init__(self, **options):
         pass
 
-    def get_quotas(self, project, key=None, keys=None):
+    def get_quotas(
+        self,
+        project: Project,
+        key: ProjectKey | None = None,
+        keys: Iterable[ProjectKey] | None = None,
+    ) -> list[QuotaConfig]:
         """
         Returns a quotas for the given project and its organization.
 
@@ -394,24 +459,26 @@ class Quota(Service):
                 scope=QuotaScope.PROJECT,
             ),
             AbuseQuota(
+                id="paai",
+                option="project-abuse-quota.attachment-item-limit",
+                categories=[DataCategory.ATTACHMENT_ITEM],
+                scope=QuotaScope.PROJECT,
+            ),
+            AbuseQuota(
                 id="pas",
                 option="project-abuse-quota.session-limit",
                 categories=[DataCategory.SESSION],
                 scope=QuotaScope.PROJECT,
             ),
             AbuseQuota(
-                id="oam",
-                option="organization-abuse-quota.metric-bucket-limit",
-                categories=[DataCategory.METRIC_BUCKET],
-                scope=QuotaScope.ORGANIZATION,
-            ),
-            AbuseQuota(
-                id="gam",
-                option="global-abuse-quota.metric-bucket-limit",
-                categories=[DataCategory.METRIC_BUCKET],
-                scope=QuotaScope.GLOBAL,
+                id="paspi",
+                option="project-abuse-quota.span-limit",
+                categories=[DataCategory.SPAN_INDEXED],
+                scope=QuotaScope.PROJECT,
             ),
         ]
+
+        abuse_quotas.extend(build_metric_abuse_quotas())
 
         # XXX: These reason codes are hardcoded in getsentry:
         #      as `RateLimitReasonLabel.PROJECT_ABUSE_LIMIT` and `RateLimitReasonLabel.ORG_ABUSE_LIMIT`.
@@ -449,12 +516,12 @@ class Quota(Service):
             # Negative limits in config mean a reject-all quota.
             if limit < 0:
                 yield QuotaConfig(
+                    limit=0,
                     scope=quota.scope,
                     categories=quota.categories,
-                    limit=0,
                     reason_code="disabled",
+                    namespace=quota.namespace,
                 )
-
             else:
                 yield QuotaConfig(
                     id=quota.id,
@@ -463,6 +530,7 @@ class Quota(Service):
                     categories=quota.categories,
                     window=abuse_window,
                     reason_code=reason_codes[quota.scope],
+                    namespace=quota.namespace,
                 )
 
     def get_monitor_quota(self, project):
@@ -530,7 +598,7 @@ class Quota(Service):
     ) -> float | None:
         """
         Returns the blended sample rate for an org based on the package that they are currently on. Returns ``None``
-        if the the organization doesn't have dynamic sampling.
+        if the organization doesn't have dynamic sampling.
 
         The reasoning for having two params as `Optional` is because this method was first designed to work with
         `Project` but due to requirements change the `Organization` was needed and since we can get the `Organization`
@@ -560,10 +628,30 @@ class Quota(Service):
         """
         return SeatAssignmentResult(assignable=True)
 
+    def check_assign_seat(
+        self, data_category: DataCategory, seat_object: SeatObject
+    ) -> SeatAssignmentResult:
+        """
+        Determines if an assignable seat object can be assigned a seat.
+        If it is not possible to assign a monitor a seat, a reason
+        will be included in the response.
+        """
+        return SeatAssignmentResult(assignable=True)
+
     def check_assign_monitor_seats(self, monitor: list[Monitor]) -> SeatAssignmentResult:
         """
         Determines if a list of monitor can be assigned seat. If it is not possible
         to assign a seat to all given monitors, a reason will be included in the response
+        """
+        return SeatAssignmentResult(assignable=True)
+
+    def check_assign_seats(
+        self, data_category: DataCategory, seat_objects: list[SeatObject]
+    ) -> SeatAssignmentResult:
+        """
+        Determines if a list of assignable seat objects can be assigned seat.
+        If it is not possible to assign a seat to all given objects, a reason
+        will be included in the response.
         """
         return SeatAssignmentResult(assignable=True)
 
@@ -577,9 +665,24 @@ class Quota(Service):
 
         return Outcome.ACCEPTED
 
+    def assign_seat(self, data_category: DataCategory, seat_object: SeatObject) -> int:
+        """
+        Assigns a seat to an object if possible, resulting in Outcome.ACCEPTED.
+        If the object cannot be assigned a seat it will be
+        Outcome.RATE_LIMITED.
+        """
+        from sentry.utils.outcomes import Outcome
+
+        return Outcome.ACCEPTED
+
     def disable_monitor_seat(self, monitor: Monitor) -> None:
         """
         Removes a monitor from it's assigned seat.
+        """
+
+    def disable_seat(self, data_category: DataCategory, seat_object: SeatObject) -> None:
+        """
+        Removes an object from it's assigned seat.
         """
 
     def check_accept_monitor_checkin(self, project_id: int, monitor_slug: str):
@@ -594,3 +697,11 @@ class Quota(Service):
         """
         Updates a monitor seat assignment's slug.
         """
+
+    def should_emit_profile_duration_outcome(
+        self, organization: Organization, profile: Profile
+    ) -> bool:
+        """
+        Determines if the profile duration outcome should be emitted.
+        """
+        return True

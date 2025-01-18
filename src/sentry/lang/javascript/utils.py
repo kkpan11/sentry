@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import re
 from os.path import splitext
+from typing import Any
 from urllib.parse import urlsplit
+
+from sentry.stacktraces.processing import StacktraceInfo
 
 # number of surrounding lines (on each side) to fetch
 LINES_OF_CONTEXT = 5
+
+
+# Platform values that should mark an event
+# or frame as being JavaScript for the purposes
+# of symbolication.
+JAVASCRIPT_PLATFORMS = ("javascript", "node")
 
 
 def get_source_context(
@@ -118,3 +127,19 @@ def generate_module(src: str | None) -> str:
             return "/".join(tokens[idx + 1 :])
 
     return CLEAN_MODULE_RE.sub("", filename) or UNKNOWN_MODULE
+
+
+def is_js_event(data: Any, stacktraces: list[StacktraceInfo]) -> bool:
+    """Returns whether `data` is a JS event, based on its platform and
+    the supplied stacktraces."""
+
+    if data.get("platform") in JAVASCRIPT_PLATFORMS:
+        return True
+
+    for stacktrace in stacktraces:
+        # The platforms of a stacktrace are exactly the platforms of its frames
+        # so this is tantamount to checking if any frame has a JS platform.
+        if any(x in JAVASCRIPT_PLATFORMS for x in stacktrace.platforms):
+            return True
+
+    return False

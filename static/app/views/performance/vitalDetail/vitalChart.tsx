@@ -1,4 +1,3 @@
-import {browserHistory} from 'react-router';
 import {useTheme} from '@emotion/react';
 
 import ChartZoom from 'sentry/components/charts/chartZoom';
@@ -14,15 +13,16 @@ import Panel from 'sentry/components/panels/panel';
 import QuestionTooltip from 'sentry/components/questionTooltip';
 import {IconWarning} from 'sentry/icons';
 import {t} from 'sentry/locale';
-import type {DateString, OrganizationSummary} from 'sentry/types';
+import type {DateString} from 'sentry/types/core';
 import type {Series} from 'sentry/types/echarts';
+import type {OrganizationSummary} from 'sentry/types/organization';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import {axisLabelFormatter, tooltipFormatter} from 'sentry/utils/discover/charts';
 import {aggregateOutputType} from 'sentry/utils/discover/fields';
 import {WebVital} from 'sentry/utils/fields';
 import getDynamicText from 'sentry/utils/getDynamicText';
 import useApi from 'sentry/utils/useApi';
 import {useLocation} from 'sentry/utils/useLocation';
-import useRouter from 'sentry/utils/useRouter';
 
 import {replaceSeriesName, transformEventStatsSmoothed} from '../trends/utils';
 import type {ViewProps} from '../types';
@@ -54,7 +54,6 @@ function VitalChart({
   interval,
 }: Props) {
   const location = useLocation();
-  const router = useRouter();
   const api = useApi();
   const theme = useTheme();
 
@@ -97,7 +96,7 @@ function VitalChart({
             title={t('The durations shown should fall under the vital threshold.')}
           />
         </HeaderTitleLegend>
-        <ChartZoom router={router} period={statsPeriod} start={start} end={end} utc={utc}>
+        <ChartZoom period={statsPeriod} start={start} end={end} utc={utc}>
           {zoomRenderProps => (
             <EventsRequest
               api={api}
@@ -185,7 +184,7 @@ function VitalChart({
 
 export default VitalChart;
 
-export type _VitalChartProps = {
+export type VitalChartInnerProps = {
   field: string;
   grid: LineChartProps['grid'];
   loading: boolean;
@@ -202,7 +201,7 @@ export type _VitalChartProps = {
 
 function fieldToVitalType(
   seriesName: string,
-  vitalFields: _VitalChartProps['vitalFields']
+  vitalFields: VitalChartInnerProps['vitalFields']
 ): VitalState | undefined {
   if (seriesName === vitalFields?.poorCountField.replace('equation|', '')) {
     return VitalState.POOR;
@@ -217,7 +216,7 @@ function fieldToVitalType(
   return undefined;
 }
 
-export function _VitalChart(props: _VitalChartProps) {
+export function VitalChartInner(props: VitalChartInnerProps) {
   const {
     field: yAxis,
     data: _results,
@@ -244,6 +243,7 @@ export function _VitalChart(props: _VitalChartProps) {
       valueFormatter: (value: number, seriesName?: string) => {
         return tooltipFormatter(
           value,
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           aggregateOutputType(vitalFields[0] === WebVital.CLS ? seriesName : yAxis)
         );
       },
@@ -273,6 +273,7 @@ export function _VitalChart(props: _VitalChartProps) {
         return {
           seriesName: adjustedSeries,
           ...rest,
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           color: theme[vitalStateColors[adjustedSeries]],
           lineStyle: {
             opacity: 1,

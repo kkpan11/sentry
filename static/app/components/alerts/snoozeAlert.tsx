@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useState} from 'react';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 
 import {addErrorMessage, addSuccessMessage} from 'sentry/actionCreators/indicator';
@@ -12,6 +11,7 @@ import {t} from 'sentry/locale';
 import {RuleActionsCategories} from 'sentry/types/alerts';
 import useApi from 'sentry/utils/useApi';
 import {useLocation} from 'sentry/utils/useLocation';
+import {useNavigate} from 'sentry/utils/useNavigate';
 import useOrganization from 'sentry/utils/useOrganization';
 
 type Props = {
@@ -42,6 +42,7 @@ function SnoozeAlert({
   const organization = useOrganization();
   const api = useApi();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [disabled, setDisabled] = useState(false);
 
@@ -62,10 +63,13 @@ function SnoozeAlert({
         );
 
         if (autoMute) {
-          browserHistory.replace({
-            pathname: location.pathname,
-            query: {...location.query, mute: undefined},
-          });
+          navigate(
+            {
+              pathname: location.pathname,
+              query: {...location.query, mute: undefined},
+            },
+            {replace: true}
+          );
         }
 
         setDisabled(false);
@@ -87,6 +91,7 @@ function SnoozeAlert({
     },
     [
       api,
+      navigate,
       isSnoozed,
       location.pathname,
       location.query,

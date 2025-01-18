@@ -12,9 +12,16 @@ import OrganizationStore from 'sentry/stores/organizationStore';
 import PageFiltersStore from 'sentry/stores/pageFiltersStore';
 import ProjectsStore from 'sentry/stores/projectsStore';
 import TeamStore from 'sentry/stores/teamStore';
-import type {Organization, Project, Team} from 'sentry/types';
+import type {Organization, Team} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
+import FeatureFlagOverrides from 'sentry/utils/featureFlagOverrides';
+import {
+  addOrganizationFeaturesHandler,
+  buildSentryFeaturesHandler,
+} from 'sentry/utils/featureFlags';
 import {getPreloadedDataPromise} from 'sentry/utils/getPreloadedData';
 import parseLinkHeader from 'sentry/utils/parseLinkHeader';
+import type RequestError from 'sentry/utils/requestError/requestError';
 
 async function fetchOrg(
   api: Client,
@@ -29,7 +36,7 @@ async function fetchOrg(
       // If this url changes make sure to update the preload
       api.requestPromise(`/organizations/${slug}/`, {
         includeAllArgs: true,
-        query: {detailed: 0},
+        query: {detailed: 0, include_feature_flags: 1},
       }),
     usePreload
   );
@@ -38,15 +45,20 @@ async function fetchOrg(
     throw new Error('retrieved organization is falsey');
   }
 
+  FeatureFlagOverrides.singleton().loadOrg(org);
+  addOrganizationFeaturesHandler({
+    organization: org,
+    handler: buildSentryFeaturesHandler('feature.organizations:'),
+  });
+
   OrganizationStore.onUpdate(org, {replace: true});
   setActiveOrganization(org);
 
-  Sentry.configureScope(scope => {
-    // XXX(dcramer): this is duplicated in sdk.py on the backend
-    scope.setTag('organization', org.id);
-    scope.setTag('organization.slug', org.slug);
-    scope.setContext('organization', {id: org.id, slug: org.slug});
-  });
+  const scope = Sentry.getCurrentScope();
+  // XXX(dcramer): this is duplicated in sdk.py on the backend
+  scope.setTag('organization', org.id);
+  scope.setTag('organization.slug', org.slug);
+  scope.setContext('organization', {id: org.id, slug: org.slug});
 
   return org;
 }
@@ -73,7 +85,7 @@ async function fetchProjectsAndTeams(
         includeAllArgs: true,
         query: {
           all_projects: 1,
-          collapse: 'latestDeploys',
+          collapse: ['latestDeploys', 'unusedFeatures'],
         },
       }),
     usePreload
@@ -119,12 +131,12 @@ async function fetchProjectsAndTeams(
  *               current organization in the store)
  * @param usePreload Should the preloaded data be used if available?
  */
-export function fetchOrganizationDetails(
+export async function fetchOrganizationDetails(
   api: Client,
   slug: string,
   silent: boolean,
   usePreload?: boolean
-) {
+): Promise<void> {
   if (!silent) {
     OrganizationStore.reset();
     ProjectsStore.reset();
@@ -132,33 +144,40 @@ export function fetchOrganizationDetails(
     PageFiltersStore.onReset();
   }
 
+  const getErrorMessage = (err: RequestError) => {
+    if (typeof err.responseJSON?.detail === 'string') {
+      return err.responseJSON?.detail;
+    }
+    if (typeof err.responseJSON?.detail?.message === 'string') {
+      return err.responseJSON?.detail.message;
+    }
+    return null;
+  };
+
   const loadOrganization = async () => {
+    let org: Organization | undefined = undefined;
     try {
-      await fetchOrg(api, slug, usePreload);
+      org = await fetchOrg(api, slug, usePreload);
     } catch (err) {
       if (!err) {
-        return;
+        throw err;
       }
 
       OrganizationStore.onFetchOrgError(err);
 
       if (err.status === 403 || err.status === 401) {
-        const errMessage =
-          typeof err.responseJSON?.detail === 'string'
-            ? err.responseJSON?.detail
-            : typeof err.responseJSON?.detail?.message === 'string'
-              ? err.responseJSON?.detail.message
-              : null;
+        const errMessage = getErrorMessage(err);
 
         if (errMessage) {
           addErrorMessage(errMessage);
+          throw errMessage;
         }
 
-        return;
+        return undefined;
       }
-
       Sentry.captureException(err);
     }
+    return org;
   };
 
   const loadTeamsAndProjects = async () => {
@@ -175,7 +194,8 @@ export function fetchOrganizationDetails(
     } else {
       TeamStore.loadInitialData(teams);
     }
+    return [projects, teams];
   };
 
-  return Promise.all([loadOrganization(), loadTeamsAndProjects()]);
+  await Promise.all([loadOrganization(), loadTeamsAndProjects()]);
 }

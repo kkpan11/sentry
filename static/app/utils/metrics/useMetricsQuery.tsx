@@ -1,17 +1,24 @@
 import {useMemo} from 'react';
 
-import type {PageFilters} from 'sentry/types';
-import {parsePeriodToHours} from 'sentry/utils/dates';
-import {getDateTimeParams, getDDMInterval} from 'sentry/utils/metrics';
-import {getUseCaseFromMRI, MRIToField, parseField} from 'sentry/utils/metrics/mri';
+import type {PageFilters} from 'sentry/types/core';
+import {
+  getDateTimeParams,
+  getMetricsInterval,
+  isVirtualMetric,
+} from 'sentry/utils/metrics';
+import {hasMetricsNewInputs} from 'sentry/utils/metrics/features';
+import {getUseCaseFromMRI, MRIToField} from 'sentry/utils/metrics/mri';
+import {useVirtualMetricsContext} from 'sentry/utils/metrics/virtualMetricsContext';
 import {useApiQuery} from 'sentry/utils/queryClient';
 import useOrganization from 'sentry/utils/useOrganization';
 
 import type {
+  MetricAggregation,
   MetricsDataIntervalLadder,
   MetricsQueryApiResponse,
   MRI,
 } from '../../types/metrics';
+import {parsePeriodToHours} from '../duration/parsePeriodToHours';
 
 export function createMqlQuery({
   field,
@@ -32,57 +39,128 @@ export function createMqlQuery({
   return mql;
 }
 
-interface MetricsQueryApiRequestQuery {
-  field: string;
+export interface MetricsQueryApiRequestQuery {
+  aggregation: MetricAggregation;
+  mri: MRI;
+  name: string;
+  alias?: string;
+  // Conditions are used to identify virtual metrics
+  condition?: number;
   groupBy?: string[];
+  isQueryOnly?: boolean;
   limit?: number;
-  name?: string;
   orderBy?: 'asc' | 'desc';
   query?: string;
 }
+
+export interface MetricsQueryApiRequestFormula {
+  formula: string;
+  name: string;
+  alias?: string;
+  limit?: number;
+  orderBy?: 'asc' | 'desc';
+}
+
+export type MetricsQueryApiQueryParams =
+  | MetricsQueryApiRequestQuery
+  | MetricsQueryApiRequestFormula;
 
 const getQueryInterval = (
   query: MetricsQueryApiRequestQuery,
   datetime: PageFilters['datetime'],
   intervalLadder?: MetricsDataIntervalLadder
 ) => {
-  const {mri: mri} = parseField(query.field) ?? {};
-  const useCase = getUseCaseFromMRI(mri) ?? 'custom';
-  return getDDMInterval(datetime, useCase, intervalLadder);
+  const useCase = getUseCaseFromMRI(query.mri) ?? 'custom';
+  return getMetricsInterval(datetime, useCase, intervalLadder);
 };
 
+export function isMetricFormula(
+  queryEntry: MetricsQueryApiQueryParams
+): queryEntry is MetricsQueryApiRequestFormula {
+  return 'formula' in queryEntry;
+}
+
 export function getMetricsQueryApiRequestPayload(
-  queries: MetricsQueryApiRequestQuery[],
-  {projects, environments, datetime}: PageFilters,
+  queries: (MetricsQueryApiRequestQuery | MetricsQueryApiRequestFormula)[],
+  {
+    projects,
+    environments,
+    datetime,
+  }: {
+    datetime: PageFilters['datetime'];
+    environments: PageFilters['environments'];
+    projects: (number | string)[];
+  },
   {
     intervalLadder,
     interval: intervalParam,
-  }: {interval?: string; intervalLadder?: MetricsDataIntervalLadder} = {}
+    includeSeries = true,
+  }: {
+    includeSeries?: boolean;
+    interval?: string;
+    intervalLadder?: MetricsDataIntervalLadder;
+  } = {}
 ) {
   // We want to use the largest interval from all queries so none fails
   // In the future the endpoint should handle this
   const interval =
     intervalParam ??
     queries
-      .map(query => getQueryInterval(query, datetime, intervalLadder))
+      .map(query =>
+        !isMetricFormula(query) ? getQueryInterval(query, datetime, intervalLadder) : '1m'
+      )
       .reduce(
         (acc, curr) => (parsePeriodToHours(curr) > parsePeriodToHours(acc) ? curr : acc),
-        '10s'
+        '1m'
       );
 
   const requestQueries: {mql: string; name: string}[] = [];
-  const requestFormulas: {mql: string; limit?: number; order?: 'asc' | 'desc'}[] = [];
+  const requestFormulas: {
+    mql: string;
+    limit?: number;
+    name?: string;
+    order?: 'asc' | 'desc';
+  }[] = [];
 
   queries.forEach((query, index) => {
-    const {field, groupBy, limit, orderBy, query: queryParam, name: nameParam} = query;
-    const name = nameParam || `query_${index + 1}`;
-    const hasGoupBy = groupBy && groupBy.length > 0;
-    requestQueries.push({name, mql: createMqlQuery({field, query: queryParam, groupBy})});
-    requestFormulas.push({
-      mql: `$${name}`,
+    if (isMetricFormula(query)) {
+      requestFormulas.push({
+        mql: query.formula,
+        limit: query.limit,
+        order: query.orderBy,
+      });
+      return;
+    }
+
+    const {
+      mri,
+      aggregation,
+      groupBy,
       limit,
-      order: hasGoupBy ? orderBy ?? 'desc' : undefined,
+      orderBy,
+      query: queryParam,
+      name: nameParam,
+      isQueryOnly,
+    } = query;
+    const name = nameParam || `query_${index + 1}`;
+    const hasGroupBy = groupBy && groupBy.length > 0;
+
+    requestQueries.push({
+      name,
+      mql: createMqlQuery({
+        field: MRIToField(mri, aggregation),
+        query: queryParam,
+        groupBy,
+      }),
     });
+
+    if (!isQueryOnly) {
+      requestFormulas.push({
+        mql: `$${name}`,
+        limit,
+        order: hasGroupBy ? orderBy : undefined,
+      });
+    }
   });
 
   return {
@@ -91,6 +169,7 @@ export function getMetricsQueryApiRequestPayload(
       project: projects,
       environment: environments,
       interval,
+      includeSeries,
     },
     body: {
       queries: requestQueries,
@@ -99,28 +178,67 @@ export function getMetricsQueryApiRequestPayload(
   };
 }
 
-export type MetricsQueryApiQueryParams = Omit<MetricsQueryApiRequestQuery, 'field'> & {
-  mri: MRI;
-  op?: string;
-};
-
 export function useMetricsQuery(
   queries: MetricsQueryApiQueryParams[],
-  {projects, environments, datetime}: PageFilters,
-  overrides: {interval?: string; intervalLadder?: MetricsDataIntervalLadder} = {}
+  {
+    projects,
+    environments,
+    datetime,
+  }: {
+    datetime: PageFilters['datetime'];
+    environments: PageFilters['environments'];
+    projects: (number | string)[];
+  },
+  overrides: {
+    includeSeries?: boolean;
+    interval?: string;
+    intervalLadder?: MetricsDataIntervalLadder;
+  } = {},
+  enableRefetch = true
 ) {
   const organization = useOrganization();
+  const metricsNewInputs = hasMetricsNewInputs(organization);
+  const {resolveVirtualMRI, isLoading} = useVirtualMetricsContext();
 
-  const queryIsComplete = queries.every(({op}) => op);
+  const resolvedQueries = useMemo(
+    () =>
+      queries
+        .map(query => {
+          if (isMetricFormula(query)) {
+            if (metricsNewInputs) {
+              return {
+                ...query,
+                formula: query.formula.toUpperCase(),
+              };
+            }
+            return query;
+          }
+          if (!isVirtualMetric(query)) {
+            return query;
+          }
+          if (!query.condition) {
+            // Invalid state. A virtual metric always needs to have a condition
+            return null;
+          }
+          const {mri, aggregation} = resolveVirtualMRI(
+            query.mri,
+            query.condition,
+            query.aggregation
+          );
+          return {...query, mri, aggregation};
+        })
+        .filter(query => query !== null),
+    [queries, resolveVirtualMRI, metricsNewInputs]
+  );
 
   const {query: queryToSend, body} = useMemo(
     () =>
       getMetricsQueryApiRequestPayload(
-        queries.map(query => ({...query, field: MRIToField(query.mri, query.op!)})),
+        resolvedQueries,
         {datetime, projects, environments},
         {...overrides}
       ),
-    [queries, datetime, projects, environments, overrides]
+    [resolvedQueries, datetime, projects, environments, overrides]
   );
 
   return useApiQuery<MetricsQueryApiResponse>(
@@ -131,10 +249,10 @@ export function useMetricsQuery(
     {
       retry: 0,
       staleTime: 0,
-      refetchOnReconnect: true,
-      refetchOnWindowFocus: true,
+      refetchOnReconnect: enableRefetch,
+      refetchOnWindowFocus: enableRefetch,
       refetchInterval: false,
-      enabled: queryIsComplete,
+      enabled: !isLoading,
     }
   );
 }

@@ -8,7 +8,9 @@ import SortLink from 'sentry/components/gridEditable/sortLink';
 import Link from 'sentry/components/links/link';
 import {Tooltip} from 'sentry/components/tooltip';
 import {t} from 'sentry/locale';
-import type {Organization, PageFilters, Project} from 'sentry/types';
+import type {PageFilters} from 'sentry/types/core';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {defined} from 'sentry/utils';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import {
@@ -32,6 +34,7 @@ import {
   generateEventSlug,
 } from 'sentry/utils/discover/urls';
 import {formatMRIField, parseField} from 'sentry/utils/metrics/mri';
+import {getCustomEventsFieldRenderer} from 'sentry/views/dashboards/datasetConfig/errorsAndTransactions';
 import type {Widget} from 'sentry/views/dashboards/types';
 import {DisplayType, WidgetType} from 'sentry/views/dashboards/types';
 import {eventViewFromWidget} from 'sentry/views/dashboards/utils';
@@ -77,7 +80,7 @@ export const renderIssueGridHeaderCell = ({
       <SortLink
         align={align}
         title={<StyledTooltip title={column.name}>{column.name}</StyledTooltip>}
-        direction={widget.queries[0].orderby === sortField ? 'desc' : undefined}
+        direction={widget.queries[0]!.orderby === sortField ? 'desc' : undefined}
         canSort={!!sortField}
         generateSortLink={() => ({
           ...location,
@@ -115,14 +118,14 @@ export const renderDiscoverGridHeaderCell = ({
     column: TableColumn<keyof TableDataRow>,
     _columnIndex: number
   ): React.ReactNode {
-    const {orderby} = widget.queries[0];
+    const {orderby} = widget.queries[0]!;
     // Need to convert orderby to aggregate alias because eventView still uses aggregate alias format
     const aggregateAliasOrderBy = `${
       orderby.startsWith('-') ? '-' : ''
     }${getAggregateAlias(trimStart(orderby, '-'))}`;
     const eventView = eventViewFromWidget(
       widget.title,
-      {...widget.queries[0], orderby: aggregateAliasOrderBy},
+      {...widget.queries[0]!, orderby: aggregateAliasOrderBy},
       selection
     );
     const tableMeta = tableData?.meta;
@@ -200,18 +203,17 @@ export const renderGridBodyCell = ({
         )(dataRow, {organization, location});
         break;
       case WidgetType.DISCOVER:
+      case WidgetType.TRANSACTIONS:
+      case WidgetType.ERRORS:
       default:
         if (!tableData || !tableData.meta) {
           return dataRow[column.key];
         }
         const unit = tableData.meta.units?.[column.key];
-        cell = getFieldRenderer(
-          columnKey,
-          tableData.meta,
-          false
-        )(dataRow, {
+        cell = getCustomEventsFieldRenderer(columnKey, tableData.meta)(dataRow, {
           organization,
           location,
+          eventView,
           unit,
         });
 
@@ -316,7 +318,7 @@ export const renderReleaseGridHeaderCell = ({
   ): React.ReactNode {
     const tableMeta = tableData?.meta;
     const align = fieldAlignment(column.name, column.type, tableMeta);
-    const widgetOrderBy = widget.queries[0].orderby;
+    const widgetOrderBy = widget.queries[0]!.orderby;
     const sort: Sort = {
       kind: widgetOrderBy.startsWith('-') ? 'desc' : 'asc',
       field: widgetOrderBy.startsWith('-') ? widgetOrderBy.slice(1) : widgetOrderBy,

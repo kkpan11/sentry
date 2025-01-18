@@ -10,6 +10,11 @@ import type {
   DocsParams,
   OnboardingConfig,
 } from 'sentry/components/onboarding/gettingStartedDoc/types';
+import {
+  getReplayMobileConfigureDescription,
+  getReplayVerifyStep,
+} from 'sentry/components/onboarding/gettingStartedDoc/utils/replayOnboarding';
+import {feedbackOnboardingCrashApiJava} from 'sentry/gettingStartedDocs/java/java';
 import {t, tct} from 'sentry/locale';
 import {getPackageVersion} from 'sentry/utils/gettingStartedDocs/getPackageVersion';
 
@@ -57,7 +62,7 @@ plugins {
 const getConfigurationSnippet = (params: Params) => `
 <application>
   <!-- Required: set your sentry.io project identifier (DSN) -->
-  <meta-data android:name="io.sentry.dsn" android:value="${params.dsn}" />
+  <meta-data android:name="io.sentry.dsn" android:value="${params.dsn.public}" />
 
   <!-- enable automatic breadcrumbs for user interactions (clicks, swipes, scrolls) -->
   <meta-data android:name="io.sentry.traces.user-interaction.enable" android:value="true" />
@@ -91,6 +96,23 @@ val breakWorld = Button(this).apply {
 addContentView(breakWorld, ViewGroup.LayoutParams(
   ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))`;
 
+const getReplaySetupSnippetKotlin = (params: Params) => `
+SentryAndroid.init(context) { options ->
+  options.dsn = "${params.dsn.public}"
+  options.isDebug = true
+
+  options.sessionReplay.onErrorSampleRate = 1.0
+  options.sessionReplay.sessionSampleRate = 0.1
+}`;
+
+const getReplaySetupSnippetXml = () => `
+<meta-data android:name="io.sentry.session-replay.on-error-sample-rate" android:value="1.0" />
+<meta-data android:name="io.sentry.session-replay.session-sample-rate" android:value="1.0" />`;
+
+const getReplayConfigurationSnippet = () => `
+options.sessionReplay.redactAllText = true
+options.sessionReplay.redactAllImages = true`;
+
 const onboarding: OnboardingConfig<PlatformOptions> = {
   install: params =>
     isAutoInstall(params)
@@ -113,7 +135,9 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
               {
                 description: (
                   <Fragment>
-                    {t('The Sentry wizard will automatically patch your application:')}
+                    <p>
+                      {t('The Sentry wizard will automatically patch your application:')}
+                    </p>
                     <List symbol="bullet">
                       <ListItem>
                         {tct(
@@ -133,10 +157,9 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
                       </ListItem>
                       <ListItem>
                         {tct(
-                          'Create [sentryProperties: sentry.properties] with an auth token to upload proguard mappings (this file is automatically added to [gitignore: .gitignore])',
+                          'Create [code: sentry.properties] with an auth token to upload proguard mappings (this file is automatically added to [code: .gitignore])',
                           {
-                            sentryProperties: <code />,
-                            gitignore: <code />,
+                            code: <code />,
                           }
                         )}
                       </ListItem>
@@ -146,17 +169,15 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
                         )}
                       </ListItem>
                     </List>
-                    <p>
-                      {tct(
-                        'Alternatively, you can also [manualSetupLink:set up the SDK manually].',
-                        {
-                          manualSetupLink: (
-                            <ExternalLink href="https://docs.sentry.io/platforms/android/manual-setup/" />
-                          ),
-                        }
-                      )}
-                    </p>
                   </Fragment>
+                ),
+                additionalInfo: tct(
+                  'Alternatively, you can also [manualSetupLink:set up the SDK manually].',
+                  {
+                    manualSetupLink: (
+                      <ExternalLink href="https://docs.sentry.io/platforms/android/manual-setup/" />
+                    ),
+                  }
                 ),
               },
             ],
@@ -193,10 +214,9 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
               <Fragment>
                 <p>
                   {tct(
-                    'Configuration is done via the application [manifest: AndroidManifest.xml]. Under the hood Sentry uses a [provider:ContentProvider] to initialize the SDK based on the values provided below. This way the SDK can capture important crashes and metrics right from the app start.',
+                    'Configuration is done via the application [code: AndroidManifest.xml]. Under the hood Sentry uses a [code:ContentProvider] to initialize the SDK based on the values provided below. This way the SDK can capture important crashes and metrics right from the app start.',
                     {
-                      manifest: <code />,
-                      provider: <code />,
+                      code: <code />,
                     }
                   )}
                 </p>
@@ -281,9 +301,144 @@ const onboarding: OnboardingConfig<PlatformOptions> = {
         ],
 };
 
+const replayOnboarding: OnboardingConfig<PlatformOptions> = {
+  install: (params: Params) => [
+    {
+      type: StepType.INSTALL,
+      description: tct(
+        "Make sure your Sentry Android SDK version is at least 7.20.0. The easiest way to update through the Sentry Android Gradle plugin to your app module's [code:build.gradle] file.",
+        {code: <code />}
+      ),
+      configurations: [
+        {
+          code: [
+            {
+              label: 'Groovy',
+              value: 'groovy',
+              language: 'groovy',
+              filename: 'app/build.gradle',
+              code: `plugins {
+  id "com.android.application"
+  id "io.sentry.android.gradle" version "${getPackageVersion(
+    params,
+    'sentry.java.android.gradle-plugin',
+    '4.11.0'
+  )}"
+}`,
+            },
+            {
+              label: 'Kotlin',
+              value: 'kotlin',
+              language: 'kotlin',
+              filename: 'app/build.gradle.kts',
+              code: `plugins {
+  id("com.android.application")
+  id("io.sentry.android.gradle") version "${getPackageVersion(
+    params,
+    'sentry.java.android.gradle-plugin',
+    '4.11.0'
+  )}"
+}`,
+            },
+          ],
+        },
+        {
+          description: tct(
+            'If you have the SDK installed without the Sentry Gradle Plugin, you can update the version directly in the [code:build.gradle] through:',
+            {code: <code />}
+          ),
+        },
+        {
+          code: [
+            {
+              label: 'Groovy',
+              value: 'groovy',
+              language: 'groovy',
+              filename: 'app/build.gradle',
+              code: `dependencies {
+    implementation 'io.sentry:sentry-android:${getPackageVersion(
+      params,
+      'sentry.java.android',
+      '7.14.0'
+    )}'
+}`,
+            },
+            {
+              label: 'Kotlin',
+              value: 'kotlin',
+              language: 'kotlin',
+              filename: 'app/build.gradle.kts',
+              code: `dependencies {
+    implementation("io.sentry:sentry-android:${getPackageVersion(
+      params,
+      'sentry.java.android',
+      '7.14.0'
+    )}")
+}`,
+            },
+          ],
+        },
+        {
+          description: t(
+            'To set up the integration, add the following to your Sentry initialization:'
+          ),
+        },
+        {
+          code: [
+            {
+              label: 'Kotlin',
+              value: 'kotlin',
+              language: 'kotlin',
+              code: getReplaySetupSnippetKotlin(params),
+            },
+            {
+              label: 'XML',
+              value: 'xml',
+              language: 'xml',
+              filename: 'AndroidManifest.xml',
+              code: getReplaySetupSnippetXml(),
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  configure: () => [
+    {
+      type: StepType.CONFIGURE,
+      description: getReplayMobileConfigureDescription({
+        link: 'https://docs.sentry.io/platforms/android/session-replay/#privacy',
+      }),
+      configurations: [
+        {
+          description: t(
+            'The following code is the default configuration, which masks and blocks everything.'
+          ),
+          code: [
+            {
+              label: 'Kotlin',
+              value: 'kotlin',
+              language: 'kotlin',
+              code: getReplayConfigurationSnippet(),
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  verify: getReplayVerifyStep({
+    replayOnErrorSampleRateName: 'options\u200b.sessionReplay\u200b.onErrorSampleRate',
+    replaySessionSampleRateName: 'options\u200b.sessionReplay\u200b.sessionSampleRate',
+  }),
+  nextSteps: () => [],
+};
+
 const docs: Docs<PlatformOptions> = {
   onboarding,
+  feedbackOnboardingCrashApi: feedbackOnboardingCrashApiJava,
+  crashReportOnboarding: feedbackOnboardingCrashApiJava,
   platformOptions,
+  replayOnboarding,
 };
 
 export default docs;

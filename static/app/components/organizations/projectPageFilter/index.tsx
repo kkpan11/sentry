@@ -7,7 +7,7 @@ import sortBy from 'lodash/sortBy';
 import {updateProjects} from 'sentry/actionCreators/pageFilters';
 import Feature from 'sentry/components/acl/feature';
 import FeatureDisabled from 'sentry/components/acl/featureDisabled';
-import {Button} from 'sentry/components/button';
+import {LinkButton} from 'sentry/components/button';
 import type {SelectOption, SelectOptionOrSection} from 'sentry/components/compactSelect';
 import {Hovercard} from 'sentry/components/hovercard';
 import ProjectBadge from 'sentry/components/idBadge/projectBadge';
@@ -17,8 +17,7 @@ import BookmarkStar from 'sentry/components/projects/bookmarkStar';
 import {ALL_ACCESS_PROJECTS} from 'sentry/constants/pageFilters';
 import {IconOpen, IconSettings} from 'sentry/icons';
 import {t, tct} from 'sentry/locale';
-import ConfigStore from 'sentry/stores/configStore';
-import type {Project} from 'sentry/types';
+import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import getRouteStringFromRoutes from 'sentry/utils/getRouteStringFromRoutes';
 import useOrganization from 'sentry/utils/useOrganization';
@@ -26,6 +25,7 @@ import usePageFilters from 'sentry/utils/usePageFilters';
 import useProjects from 'sentry/utils/useProjects';
 import useRouter from 'sentry/utils/useRouter';
 import {useRoutes} from 'sentry/utils/useRoutes';
+import {useUser} from 'sentry/utils/useUser';
 
 import {DesyncedFilterMessage} from '../pageFilters/desyncedFilter';
 
@@ -55,6 +55,18 @@ export interface ProjectPageFilterProps
    */
   footerMessage?: React.ReactNode;
   /**
+   * This overrides the selected projects that is DISPLAYED by
+   * the project select.
+   *
+   * Use this when you want to display a disabled project selector
+   * with a fixed set of projects. For example, if you always want
+   * it to show `All Projects`.
+   *
+   * It does NOT override the projects in the store, so hooks like
+   * `usePageFilters` will not reflect this override.
+   */
+  projectOverride?: number[];
+  /**
    * Reset these URL params when we fire actions (custom routing only)
    */
   resetParamsOnChange?: string[];
@@ -76,10 +88,12 @@ export function ProjectPageFilter({
   menuTitle,
   menuWidth,
   trigger,
+  projectOverride,
   resetParamsOnChange,
   footerMessage,
   ...selectProps
 }: ProjectPageFilterProps) {
+  const user = useUser();
   const router = useRouter();
   const routes = useRoutes();
   const organization = useOrganization();
@@ -93,13 +107,12 @@ export function ProjectPageFilter({
   );
 
   const showNonMemberProjects = useMemo(() => {
-    const {isSuperuser} = ConfigStore.get('user');
     const isOrgAdminOrManager =
       organization.orgRole === 'owner' || organization.orgRole === 'manager';
     const isOpenMembership = organization.features.includes('open-membership');
 
-    return isSuperuser || isOrgAdminOrManager || isOpenMembership;
-  }, [organization.orgRole, organization.features]);
+    return user.isSuperuser || isOrgAdminOrManager || isOpenMembership;
+  }, [user, organization.orgRole, organization.features]);
 
   const nonMemberProjects = useMemo(
     () => (showNonMemberProjects ? otherProjects : []),
@@ -158,22 +171,22 @@ export function ProjectPageFilter({
       if (!val.length) {
         return allowMultiple
           ? memberProjects.map(p => parseInt(p.id, 10))
-          : [parseInt(memberProjects[0]?.id, 10)];
+          : [parseInt(memberProjects[0]!?.id, 10)];
       }
 
-      return allowMultiple ? val : [val[0]];
+      return allowMultiple ? val : [val[0]!];
     },
     [memberProjects, allowMultiple]
   );
 
   const value = useMemo<number[]>(
-    () => mapURLValueToNormalValue(pageFilterValue),
-    [mapURLValueToNormalValue, pageFilterValue]
+    () => mapURLValueToNormalValue(projectOverride ?? pageFilterValue),
+    [mapURLValueToNormalValue, pageFilterValue, projectOverride]
   );
 
   const defaultValue = useMemo<number[]>(
-    () => mapURLValueToNormalValue([]),
-    [mapURLValueToNormalValue]
+    () => mapURLValueToNormalValue(projectOverride ?? []),
+    [mapURLValueToNormalValue, projectOverride]
   );
 
   const handleChange = useCallback(
@@ -213,7 +226,7 @@ export function ProjectPageFilter({
   );
 
   const onToggle = useCallback(
-    newValue => {
+    (newValue: any) => {
       trackAnalytics('projectselector.toggle', {
         action: newValue.length > value.length ? 'added' : 'removed',
         path: getRouteStringFromRoutes(routes),
@@ -251,7 +264,7 @@ export function ProjectPageFilter({
         leadingItems: (
           <ProjectBadge project={project} avatarSize={16} hideName disableLink />
         ),
-        trailingItems: ({isFocused}) => (
+        trailingItems: ({isFocused}: any) => (
           <Fragment>
             <TrailingButton
               borderless
@@ -348,7 +361,7 @@ export function ProjectPageFilter({
 
   const menuFooterMessage = useMemo(() => {
     if (selectionLimitExceeded) {
-      return hasStagedChanges =>
+      return (hasStagedChanges: any) =>
         hasStagedChanges
           ? tct(
               'Only up to [limit] projects can be selected at a time. You can still press “Clear” to see all projects.',
@@ -446,7 +459,7 @@ function checkboxWrapper(
   );
 }
 
-const TrailingButton = styled(Button)<{visible: boolean}>`
+const TrailingButton = styled(LinkButton)<{visible: boolean}>`
   color: ${p => p.theme.subText};
   display: ${p => (p.visible ? 'block' : 'none')};
 `;

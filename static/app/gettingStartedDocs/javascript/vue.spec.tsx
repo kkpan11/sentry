@@ -2,7 +2,7 @@ import {renderWithOnboardingLayout} from 'sentry-test/onboarding/renderWithOnboa
 import {screen} from 'sentry-test/reactTestingLibrary';
 import {textWithMarkupMatcher} from 'sentry-test/utils';
 
-import {ProductSolution} from 'sentry/components/onboarding/productSelection';
+import {ProductSolution} from 'sentry/components/onboarding/gettingStartedDoc/types';
 
 import docs from './vue';
 
@@ -32,13 +32,13 @@ describe('javascript-vue onboarding docs', function () {
     });
 
     expect(
-      screen.queryByText(textWithMarkupMatcher(/tracesSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/tracesSampleRate/))
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(textWithMarkupMatcher(/replaysSessionSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/replaysSessionSampleRate/))
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(textWithMarkupMatcher(/replaysOnErrorSampleRate/))
+      screen.getByText(textWithMarkupMatcher(/replaysOnErrorSampleRate/))
     ).toBeInTheDocument();
   });
 
@@ -68,6 +68,19 @@ describe('javascript-vue onboarding docs', function () {
     ).toBeInTheDocument();
     expect(
       screen.getByText(textWithMarkupMatcher(/replaysOnErrorSampleRate: 1\.0/))
+    ).toBeInTheDocument();
+  });
+
+  it('enables profiling by setting profiling sample rates', () => {
+    renderWithOnboardingLayout(docs, {
+      selectedProducts: [ProductSolution.ERROR_MONITORING, ProductSolution.PROFILING],
+    });
+
+    expect(
+      screen.getByText(textWithMarkupMatcher(/Sentry.browserProfilingIntegration\(\)/))
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(textWithMarkupMatcher(/profilesSampleRate: 1\.0/))
     ).toBeInTheDocument();
   });
 });

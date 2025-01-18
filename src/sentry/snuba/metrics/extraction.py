@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NamedTuple, NotRequired, Optional, TypedDict, TypeVar, Union, cast
+from typing import Any, Literal, NamedTuple, NotRequired, Optional, Self, TypedDict, TypeVar, cast
 
 import sentry_sdk
 from django.utils.functional import cached_property
@@ -24,18 +26,32 @@ from sentry.api.event_search import (
 from sentry.constants import DataCategory
 from sentry.discover.arithmetic import is_equation
 from sentry.exceptions import InvalidSearchQuery
+from sentry.features.rollout import in_random_rollout
 from sentry.models.organization import Organization
 from sentry.models.project import Project
 from sentry.models.transaction_threshold import ProjectTransactionThreshold, TransactionMetric
+from sentry.relay.types import RuleCondition
 from sentry.search.events import fields
-from sentry.search.events.builder import UnresolvedQuery
-from sentry.search.events.constants import DEFAULT_PROJECT_THRESHOLD, VITAL_THRESHOLDS
+from sentry.search.events.builder.discover import UnresolvedQuery
+from sentry.search.events.constants import VITAL_THRESHOLDS
 from sentry.snuba.dataset import Dataset
 from sentry.snuba.metrics.naming_layer.mri import ParsedMRI, parse_mri
 from sentry.snuba.metrics.utils import MetricOperationType
+from sentry.utils import metrics
+from sentry.utils.hashlib import md5_text
 from sentry.utils.snuba import is_measurement, is_span_op_breakdown, resolve_column
 
 logger = logging.getLogger(__name__)
+
+SPEC_VERSION_TWO_FLAG = "organizations:on-demand-metrics-query-spec-version-two"
+# Certain functions will only be supported with certain feature flags
+OPS_REQUIRE_FEAT_FLAG = {
+    "count_unique": SPEC_VERSION_TWO_FLAG,
+    "user_misery": SPEC_VERSION_TWO_FLAG,
+}
+
+# Splits the bulk cache for on-demand resolution into N chunks
+WIDGET_QUERY_CACHE_MAX_CHUNKS = 6
 
 
 # This helps us control the different spec versions
@@ -73,7 +89,7 @@ class OnDemandMetricSpecVersioning:
     def get_query_spec_version(cls: Any, organization_id: int) -> SpecVersion:
         """Return spec version based on feature flag enabled for an organization."""
         org = Organization.objects.get_from_cache(id=organization_id)
-        if features.has("organizations:on-demand-metrics-query-spec-version-two", org):
+        if features.has(SPEC_VERSION_TWO_FLAG, org):
             return cls.spec_versions[1]
         return cls.spec_versions[0]
 
@@ -91,9 +107,8 @@ class OnDemandMetricSpecVersioning:
 CUSTOM_ALERT_METRIC_NAME = "transactions/on_demand"
 QUERY_HASH_KEY = "query_hash"
 
-# Base type for conditions to evaluate on payloads.
-# TODO: Streamline with dynamic sampling.
-RuleCondition = Union["LogicalRuleCondition", "ComparingRuleCondition", "NotRuleCondition"]
+# Comparison operators used by Relay.
+CompareOp = Literal["eq", "gt", "gte", "lt", "lte", "glob"]
 
 # There are some search tokens that are exclusive to searching errors, thus, we need
 # to treat the query as not on-demand.
@@ -114,6 +129,9 @@ _SEARCH_TO_PROTOCOL_FIELDS = {
     "level": "level",
     "logger": "logger",
     # Top-level structures ("interfaces")
+    # sentry_user is a special field added for on-demand metrics
+    # https://github.com/getsentry/relay/pull/3122
+    "user": "sentry_user",
     "user.email": "user.email",
     "user.id": "user.id",
     "user.ip": "user.ip_address",
@@ -133,6 +151,7 @@ _SEARCH_TO_PROTOCOL_FIELDS = {
     "sdk.version": "sdk.version",
     # Subset of context fields
     "app.in_foreground": "contexts.app.in_foreground",
+    "app.device": "contexts.app.device_app_hash",
     "device": "contexts.device.model",
     "device.arch": "contexts.device.arch",
     "device.battery_level": "contexts.device.battery_level",
@@ -148,10 +167,15 @@ _SEARCH_TO_PROTOCOL_FIELDS = {
     "device.screen_width_pixels": "contexts.device.screen_width_pixels",
     "device.screen_height_pixels": "contexts.device.screen_height_pixels",
     "device.simulator": "contexts.device.simulator",
+    "gpu.vendor": "contexts.gpu.vendor_name",
+    "gpu.name": "contexts.gpu.name",
+    "monitor.id": "contexts.monitor.id",
+    "monitor.slug": "contexts.monitor.slug",
     "os.build": "contexts.os.build",
     "os.kernel_version": "contexts.os.kernel_version",
     "os.name": "contexts.os.name",
     "os.version": "contexts.os.version",
+    "os.rooted": "contexts.os.rooted",
     "browser.name": "contexts.browser.name",
     "device.uuid": "contexts.device.uuid",
     "transaction.status": "contexts.trace.status",
@@ -159,33 +183,17 @@ _SEARCH_TO_PROTOCOL_FIELDS = {
     "http.status_code": "contexts.response.status_code",
     "unreal.crash_type": "contexts.unreal.crash_type",
     "profile.id": "contexts.profile.profile_id",
+    "runtime.name": "contexts.runtime.name",
     # Computed fields
     "transaction.duration": "duration",
     "release.build": "release.build",
     "release.package": "release.package",
     "release.version": "release.version.short",
-    # Known tags that have to be mapped to fields that Relay can extract
-    "tags[level]": "level",
-    "tags[logger]": "logger",
-    "tags[environment]": "environment",
-    "tags[transaction]": "transaction",
-    "tags[release]": "release",
-    "tags[dist]": "dist",
-    # These match the mapping in sentry/interfaces/contexts.py
-    "tags[app.device]": "device_app_hash",
-    "tags[device]": "device.model",
-    "tags[device.family]": "device.family",
-    "tags[runtime]": "runtime",
-    "tags[runtime.name]": "runtime.name",
-    "tags[browser]": "browser",
-    "tags[browser.name]": "browser.name",
-    "tags[os]": "os",
-    "tags[os.name]": "os.name",
-    "tags[os.rooted]": "os.rooted",
-    "tags[gpu.vendor]": "gpu.vendor_name",
-    "tags[gpu.name]": "gpu.name",
-    "tags[monitor.id]": "monitor.id",
-    "tags[monitor.slug]": "monitor.slug",
+    # These materialized fields match the mappings in sentry/interfaces/contexts.py, and they
+    # are generated by Relay given the event payload.
+    "runtime": "contexts.runtime",  # "{runtime.name} {runtime.version}"
+    "browser": "contexts.browser",  # "{browser.name} {browser.version}"
+    "os": "contexts.os",  # "{os.name} {os.version}"
     # Tags, measurements, and breakdowns are mapped by the converter
 }
 
@@ -235,10 +243,10 @@ _SEARCH_TO_DERIVED_METRIC_AGGREGATES: dict[str, MetricOperationType] = {
     "failure_rate": "on_demand_failure_rate",
     "apdex": "on_demand_apdex",
     "count_web_vitals": "on_demand_count_web_vitals",
+    "count_unique": "on_demand_count_unique",
     "epm": "on_demand_epm",
     "eps": "on_demand_eps",
-    # XXX: Remove support until we can fix the count_unique(users)
-    # "user_misery": "on_demand_user_misery",
+    "user_misery": "on_demand_user_misery",
 }
 
 # Mapping to infer metric type from Discover function.
@@ -257,6 +265,7 @@ _AGGREGATE_TO_METRIC_TYPE = {
     # With on demand metrics, evaluated metrics are actually stored, thus we have to choose a concrete metric type.
     "failure_count": "c",
     "failure_rate": "c",
+    "count_unique": "s",
     "count_web_vitals": "c",
     "apdex": "c",
     "epm": "c",
@@ -270,7 +279,12 @@ _NO_ARG_METRICS = [
     "on_demand_failure_count",
     "on_demand_failure_rate",
 ]
-_MULTIPLE_ARGS_METRICS = ["on_demand_apdex", "on_demand_count_web_vitals", "on_demand_user_misery"]
+_MULTIPLE_ARGS_METRICS = [
+    "on_demand_apdex",
+    "on_demand_count_unique",
+    "on_demand_count_web_vitals",
+    "on_demand_user_misery",
+]
 
 # Query fields that on their own do not require on-demand metric extraction but if present in an on-demand query
 # will be converted to metric extraction conditions.
@@ -299,36 +313,9 @@ _IGNORED_METRIC_CONDITION = [
     "event.type=transaction",
 ]
 
-# Operators used in ``ComparingRuleCondition``.
-CompareOp = Literal["eq", "gt", "gte", "lt", "lte", "glob"]
-
-Variables = dict[str, Any]
-
 query_builder = UnresolvedQuery(
     dataset=Dataset.Transactions, params={}
 )  # Workaround to get all updated discover functions instead of using the deprecated events fields.
-
-
-class ComparingRuleCondition(TypedDict):
-    """RuleCondition that compares a named field to a reference value."""
-
-    op: CompareOp
-    name: str
-    value: Any
-
-
-class LogicalRuleCondition(TypedDict):
-    """RuleCondition that applies a logical operator to a sequence of conditions."""
-
-    op: Literal["and", "or"]
-    inner: list[RuleCondition]
-
-
-class NotRuleCondition(TypedDict):
-    """RuleCondition that negates an inner condition."""
-
-    op: Literal["not"]
-    inner: RuleCondition
 
 
 class TagSpec(TypedDict):
@@ -368,6 +355,20 @@ class MetricSpec(TypedDict):
     field: NotRequired[str | None]
     condition: NotRequired[RuleCondition]
     tags: NotRequired[Sequence[TagSpec]]
+
+
+class TagMapping(TypedDict):
+    #: A list of Metric Resource Identifiers (MRI) to apply tags to.
+    #:
+    #: Entries in this list can contain wildcards to match metrics with dynamic MRIs.
+    metrics: list[str]
+
+    #: A list of tags to add to the metric.
+    #:
+    #: Tags can be conditional, see `TagSpec` for configuration options. For this reason, it is
+    #: possible to list tag keys multiple times, each with different conditions. The first matching
+    #: condition will be applied.
+    tags: list[TagSpec]
 
 
 def _check_event_type_transaction(
@@ -435,6 +436,7 @@ def _transform_search_query(query: Sequence[QueryToken]) -> Sequence[QueryToken]
     return transformed_query
 
 
+@metrics.wraps("metrics.extraction.parse_search_query")
 def parse_search_query(
     query: str | None,
     removed_blacklisted: bool = False,
@@ -548,22 +550,50 @@ class SupportedBy:
     on_demand_metrics: bool
 
     @classmethod
-    def neither(cls):
+    def neither(cls) -> Self:
         return cls(standard_metrics=False, on_demand_metrics=False)
 
     @classmethod
-    def both(cls):
+    def both(cls) -> Self:
         return cls(standard_metrics=True, on_demand_metrics=True)
 
     @classmethod
-    def combine(cls, *supported_by):
+    def combine(cls, *supported_by: Self) -> Self:
         return cls(
             standard_metrics=all(s.standard_metrics for s in supported_by),
             on_demand_metrics=all(s.on_demand_metrics for s in supported_by),
         )
 
 
-def should_use_on_demand_metrics(
+def should_use_on_demand_metrics_for_querying(organization: Organization, **kwargs: Any) -> bool:
+    """Helper function to check if an organization can query an specific on-demand function"""
+    components = _extract_aggregate_components(kwargs["aggregate"])
+    if components is None:
+        return False
+    function, _ = components
+
+    # This helps us control which functions are allowed to use the new spec version.
+    if function in OPS_REQUIRE_FEAT_FLAG:
+        if not organization:
+            # We need to let devs writting tests that if they intend to use a function that requires a feature flag
+            # that the organization needs to be included in the test.
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                logger.error("Pass the organization to create the spec for this function.")
+            sentry_sdk.capture_message(
+                f"Organization is required for {function} on-demand metrics."
+            )
+            return False
+        feat_flag = OPS_REQUIRE_FEAT_FLAG[function]
+        if not features.has(feat_flag, organization):
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                # This will show up in the logs and help the developer understand why the test is failing
+                logger.error("Add the feature flag to create the spec for this function.")
+            return False
+
+    return should_use_on_demand_metrics(**kwargs)
+
+
+def _should_use_on_demand_metrics(
     dataset: str | Dataset | None,
     aggregate: str,
     query: str | None,
@@ -586,6 +616,7 @@ def should_use_on_demand_metrics(
         return False
 
     function, args = components
+
     mri_aggregate = _extract_mri(args)
     if mri_aggregate is not None:
         # For now, we do not support MRIs in on demand metrics.
@@ -600,6 +631,49 @@ def should_use_on_demand_metrics(
     )
 
     return not supported_by.standard_metrics and supported_by.on_demand_metrics
+
+
+@metrics.wraps("on_demand_metrics.should_use_on_demand_metrics")
+def should_use_on_demand_metrics(
+    dataset: str | Dataset | None,
+    aggregate: str,
+    query: str | None,
+    groupbys: Sequence[str] | None = None,
+    prefilling: bool = False,
+    organization_bulk_query_cache: dict[int, dict[str, bool]] | None = None,
+) -> bool:
+    if in_random_rollout("on_demand_metrics.cache_should_use_on_demand"):
+        if organization_bulk_query_cache is None:
+            organization_bulk_query_cache = defaultdict(dict)
+
+        dataset_str = dataset.value if isinstance(dataset, Enum) else str(dataset or "")
+        groupbys_str = ",".join(sorted(groupbys)) if groupbys else ""
+        local_cache_md5 = md5_text(
+            f"{dataset_str}-{aggregate}-{query or ''}-{groupbys_str}-prefilling={prefilling}"
+        )
+        local_cache_digest_chunk = local_cache_md5.digest()[0] % WIDGET_QUERY_CACHE_MAX_CHUNKS
+        local_cache_key = local_cache_md5.hexdigest()
+        cached_result = organization_bulk_query_cache.get(local_cache_digest_chunk, {}).get(
+            local_cache_key, None
+        )
+        if cached_result:
+            metrics.incr("on_demand_metrics.should_use_on_demand_metrics.cache_hit")
+            return cached_result
+        else:
+            result = _should_use_on_demand_metrics(
+                dataset=dataset,
+                aggregate=aggregate,
+                query=query,
+                groupbys=groupbys,
+                prefilling=prefilling,
+            )
+            metrics.incr("on_demand_metrics.should_use_on_demand_metrics.cache_miss")
+            organization_bulk_query_cache[local_cache_digest_chunk][local_cache_key] = result
+            return result
+
+    return _should_use_on_demand_metrics(
+        dataset=dataset, aggregate=aggregate, query=query, groupbys=groupbys, prefilling=prefilling
+    )
 
 
 def _extract_aggregate_components(aggregate: str) -> tuple[str, list[str]] | None:
@@ -688,6 +762,9 @@ def _get_args_support(fields: Sequence[str], used_in_function: str | None = None
     if used_in_function == "apdex":
         # apdex can have two variations, either apdex() or apdex(value).
         return SupportedBy(on_demand_metrics=True, standard_metrics=False)
+
+    if used_in_function in ["epm", "eps"]:
+        return SupportedBy.both()
 
     arg = fields[0]
     return _get_field_support(arg)
@@ -789,7 +866,7 @@ def _is_error_field(token: str) -> bool:
 
 
 def _is_standard_metrics_search_term(field: str) -> bool:
-    return field in _STANDARD_METRIC_FIELDS
+    return field in _STANDARD_METRIC_FIELDS or field in _IGNORED_METRIC_FIELDS
 
 
 def _is_on_demand_supported_field(field: str) -> bool:
@@ -965,7 +1042,7 @@ def failure_tag_spec(_1: Project, _2: Sequence[str] | None) -> list[TagSpec]:
 
 def apdex_tag_spec(project: Project, arguments: Sequence[str] | None) -> list[TagSpec]:
     apdex_threshold = _get_threshold(arguments)
-    field = _map_field_name(_get_satisfactory_threshold_and_metric(project)[1])
+    field = _map_field_name(_get_satisfactory_metric(project))
 
     return [
         {
@@ -1051,7 +1128,7 @@ def user_misery_tag_spec(project: Project, arguments: Sequence[str] | None) -> l
     measured as a response time four times the satisfactory response time threshold (in milliseconds).
     It highlights transactions that have the highest impact on users."""
     threshold = _get_threshold(arguments)
-    field = _map_field_name(_get_satisfactory_threshold_and_metric(project)[1])
+    field = _map_field_name(_get_satisfactory_metric(project))
 
     return [
         {
@@ -1062,14 +1139,16 @@ def user_misery_tag_spec(project: Project, arguments: Sequence[str] | None) -> l
     ]
 
 
-# This is used to map a metric to a function which generates a specification
-_DERIVED_METRICS: dict[MetricOperationType, TagsSpecsGenerator | None] = {
+# This is used to map custom on-demand operations that requires special tags to a function which generates specs for those tags.
+_ONDEMAND_OP_TO_SPEC_GENERATOR: dict[MetricOperationType, TagsSpecsGenerator] = {
     "on_demand_failure_count": failure_tag_spec,
     "on_demand_failure_rate": failure_tag_spec,
-    "on_demand_apdex": apdex_tag_spec,
-    "on_demand_epm": None,
-    "on_demand_eps": None,
     "on_demand_count_web_vitals": count_web_vitals_spec,
+}
+# Same as `_ONDEMAND_OP_TO_SPEC_GENERATOR` except these ops may have project specific specs.
+# We use this to opt out of some kinds of organization level cacheing.
+_ONDEMAND_OP_TO_PROJECT_SPEC_GENERATOR: dict[MetricOperationType, TagsSpecsGenerator] = {
+    "on_demand_apdex": apdex_tag_spec,
     "on_demand_user_misery": user_misery_tag_spec,
 }
 
@@ -1149,7 +1228,7 @@ class OnDemandMetricSpec:
         self._arguments = []
         self._eager_process()
 
-    def _eager_process(self):
+    def _eager_process(self) -> None:
         op, metric_type, arguments = self._process_field()
 
         self.op = op
@@ -1157,12 +1236,12 @@ class OnDemandMetricSpec:
         self._arguments = arguments or []
 
     @property
-    def field_to_extract(self):
+    def field_to_extract(self) -> str | None:
         if self.op in ("on_demand_apdex", "on_demand_count_web_vitals"):
             return None
 
         if self.op in ("on_demand_user_misery"):
-            return _map_field_name("user.id")
+            return _map_field_name("user")
 
         if not self._arguments:
             return None
@@ -1192,9 +1271,7 @@ class OnDemandMetricSpec:
     @cached_property
     def query_hash(self) -> str:
         str_to_hash = self._query_str_for_hash
-        hash = hashlib.shake_128(bytes(str_to_hash, encoding="utf-8")).hexdigest(4)
-        with sentry_sdk.start_span(op="OnDemandMetricSpec.query_hash", description=hash) as span:
-            span.set_tag("str_to_hash", str_to_hash)
+        hash = hashlib.shake_128(str_to_hash.encode()).hexdigest(4)
         return hash
 
     def _field_for_hash(self) -> str | None:
@@ -1231,7 +1308,7 @@ class OnDemandMetricSpec:
         # In case we have `None` condition, we will use `None` string for hashing, so it's a sentinel value.
         return str(_deep_sorted(self.condition))
 
-    def _groupbys_for_hash(self):
+    def _groupbys_for_hash(self) -> str:
         # A sorted list of group-bys for the hash, since groupbys will be unique per on_demand metric.
         return str(sorted(self.groupbys))
 
@@ -1242,8 +1319,13 @@ class OnDemandMetricSpec:
         return self._process_query()
 
     def tags_conditions(self, project: Project) -> list[TagSpec]:
-        """Returns a list of tag conditions that will specify how tags are injected into metrics by Relay."""
-        tags_specs_generator = _DERIVED_METRICS.get(self.op)
+        """Returns a list of tag conditions that will specify how tags are injected into metrics by Relay, and a bool if those specs may be project specific."""
+        tags_specs_generator = _ONDEMAND_OP_TO_SPEC_GENERATOR.get(self.op)
+        tags_specs_generator_for_project = _ONDEMAND_OP_TO_PROJECT_SPEC_GENERATOR.get(self.op)
+
+        if tags_specs_generator_for_project is not None:
+            tags_specs_generator = tags_specs_generator_for_project
+
         if tags_specs_generator is None:
             return []
 
@@ -1461,11 +1543,14 @@ def _convert_countif_filter(key: str, op: str, value: str) -> RuleCondition:
     """Maps ``count_if`` arguments to a ``RuleCondition``."""
     assert op in _COUNTIF_TO_RELAY_OPERATORS, f"Unsupported `count_if` operator {op}"
 
-    condition: RuleCondition = {
-        "op": _COUNTIF_TO_RELAY_OPERATORS[op],
-        "name": _map_field_name(key),
-        "value": fields.normalize_count_if_value({"column": key, "value": value}),
-    }
+    condition = cast(
+        RuleCondition,
+        {
+            "op": _COUNTIF_TO_RELAY_OPERATORS[op],
+            "name": _map_field_name(key),
+            "value": fields.normalize_count_if_value({"column": key, "value": value}),
+        },
+    )
 
     if op == "notEquals":
         condition = {"op": "not", "inner": condition}
@@ -1493,30 +1578,36 @@ def _map_field_name(search_key: str) -> str:
     if resolved == "transaction_name":
         transaction_field = _SEARCH_TO_PROTOCOL_FIELDS.get("transaction")
         return f"event.{transaction_field}"
+
     if resolved.startswith("tags["):
-        return f"event.tags.{resolved[5:-1]}"
+        stripped_search_key = resolved[5:-1]
+        # In case a field is identified as a tag but the stripped search key is matching
+        # an existing field, we want to use that instead.
+        # For example 'tags[os]' or 'os' are resolved both to 'tags[os]' by `resolve_column`. To
+        # generalizing the handling, we define the mapping only for 'os' and strip it accordingly.
+        if field := _SEARCH_TO_PROTOCOL_FIELDS.get(stripped_search_key):
+            return f"event.{field}"
+
+        return f"event.tags.{stripped_search_key}"
 
     raise ValueError(f"Unsupported query field {search_key}")
 
 
-def _get_satisfactory_threshold_and_metric(project: Project) -> tuple[int, str]:
+def _get_satisfactory_metric(project: Project) -> str:
     """It returns the statisfactory response time threshold for the project and
     the associated metric ("transaction.duration" or "measurements.lcp")."""
+
     result = ProjectTransactionThreshold.filter(
         organization_id=project.organization.id,
         project_ids=[project.id],
         order_by=[],
-        value_list=["threshold", "metric"],
+        value_list=["metric"],
     )
 
     if len(result) == 0:
-        # We use the default threshold shown in the UI.
-        threshold = DEFAULT_PROJECT_THRESHOLD
         metric = TransactionMetric.DURATION.value
     else:
-        # We technically don't use this threshold since we extract it from the apdex(x) field
-        # where x is the threshold, however, we still return it in case a fallback is needed.
-        threshold, metric = result[0]
+        metric = result[0][0]
 
     if metric == TransactionMetric.DURATION.value:
         metric_field = "transaction.duration"
@@ -1526,7 +1617,7 @@ def _get_satisfactory_threshold_and_metric(project: Project) -> tuple[int, str]:
     else:
         raise Exception("Invalid metric for project transaction threshold")
 
-    return threshold, metric_field
+    return metric_field
 
 
 def _escape_wildcard(value: str) -> str:
@@ -1563,9 +1654,13 @@ class SearchQueryConverter:
     The converter can be used exactly once.
     """
 
-    def __init__(self, tokens: Sequence[QueryToken]):
+    def __init__(
+        self, tokens: Sequence[QueryToken], field_mapper: Callable[[str], str] = _map_field_name
+    ):
         self._tokens = tokens
         self._position = 0
+        # The field mapper is used to map the field names in the search query to the event protocol path.
+        self._field_mapper = field_mapper
 
     def convert(self) -> RuleCondition:
         """
@@ -1636,7 +1731,7 @@ class SearchQueryConverter:
         if filt := self._consume(SearchFilter):
             return self._filter(filt)
         elif paren := self._consume(ParenExpression):
-            return SearchQueryConverter(paren.children).convert()
+            return SearchQueryConverter(paren.children, self._field_mapper).convert()
         elif token := self._peek():
             raise ValueError(f"Unexpected token {token}")
         else:
@@ -1653,7 +1748,7 @@ class SearchQueryConverter:
         if operator == "eq" and token.value.is_wildcard():
             condition: RuleCondition = {
                 "op": "glob",
-                "name": _map_field_name(key),
+                "name": self._field_mapper(key),
                 "value": [_escape_wildcard(value)],
             }
         else:
@@ -1667,11 +1762,14 @@ class SearchQueryConverter:
             if isinstance(value, str):
                 value = event_search.translate_escape_sequences(value)
 
-            condition = {
-                "op": operator,
-                "name": _map_field_name(key),
-                "value": value,
-            }
+            condition = cast(
+                RuleCondition,
+                {
+                    "op": operator,
+                    "name": self._field_mapper(key),
+                    "value": value,
+                },
+            )
 
         # In case we have negation operators, we have to wrap them in the `not` condition.
         if token.operator in ("!=", "NOT IN"):

@@ -1,8 +1,9 @@
 from django.http import StreamingHttpResponse
 
+from sentry.integrations.types import EventLifecycleOutcome
 from sentry.models.auditlogentry import AuditLogEntry
 from sentry.models.commitfilechange import CommitFileChange
-from sentry.silo import SiloMode
+from sentry.silo.base import SiloMode
 from sentry.testutils.silo import assume_test_silo_mode
 
 
@@ -19,9 +20,6 @@ def assert_mock_called_once_with_partial(mock, *args, **kwargs):
         assert m_kwargs[kwarg] == kwargs[kwarg], (m_kwargs[kwarg], kwargs[kwarg])
 
 
-commit_file_type_choices = {c[0] for c in CommitFileChange._meta.get_field("type").choices}
-
-
 def assert_commit_shape(commit):
     assert commit["id"]
     assert commit["repository"]
@@ -32,7 +30,7 @@ def assert_commit_shape(commit):
     assert commit["patch_set"]
     patches = commit["patch_set"]
     for patch in patches:
-        assert patch["type"] in commit_file_type_choices
+        assert CommitFileChange.is_valid_type(patch["type"])
         assert patch["path"]
 
 
@@ -57,9 +55,42 @@ def assert_org_audit_log_exists(**kwargs):
     assert org_audit_log_exists(**kwargs)
 
 
-def assert_org_audit_log_does_not_exist(**kwargs):
-    assert not org_audit_log_exists(**kwargs)
+"""
+Helper functions to assert integration SLO metrics
+"""
 
 
-def delete_all_org_audit_logs():
-    return AuditLogEntry.objects.all().delete()
+def assert_halt_metric(mock_record, error_msg):
+    (event_halts,) = (
+        call for call in mock_record.mock_calls if call.args[0] == EventLifecycleOutcome.HALTED
+    )
+    if isinstance(error_msg, Exception):
+        assert isinstance(event_halts.args[1], type(error_msg))
+    else:
+        assert event_halts.args[1] == error_msg
+
+
+def assert_failure_metric(mock_record, error_msg):
+    (event_failures,) = (
+        call for call in mock_record.mock_calls if call.args[0] == EventLifecycleOutcome.FAILURE
+    )
+    if isinstance(error_msg, Exception):
+        assert isinstance(event_failures.args[1], type(error_msg))
+    else:
+        assert event_failures.args[1] == error_msg
+
+
+def assert_success_metric(mock_record):
+    event_success = (
+        call for call in mock_record.mock_calls if call.args[0] == EventLifecycleOutcome.SUCCESS
+    )
+    assert event_success
+
+
+def assert_slo_metric(
+    mock_record, event_outcome: EventLifecycleOutcome = EventLifecycleOutcome.SUCCESS
+):
+    assert len(mock_record.mock_calls) == 2
+    start, end = mock_record.mock_calls
+    assert start.args[0] == EventLifecycleOutcome.STARTED
+    assert end.args[0] == event_outcome

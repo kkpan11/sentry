@@ -1,6 +1,4 @@
 import {Fragment, useState} from 'react';
-import type {InjectedRouter} from 'react-router';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 import type {Location} from 'history';
 import omit from 'lodash/omit';
@@ -13,7 +11,6 @@ import {getInterval} from 'sentry/components/charts/utils';
 import {CreateAlertFromViewButton} from 'sentry/components/createAlertButton';
 import type {MenuItemProps} from 'sentry/components/dropdownMenu';
 import {DropdownMenu} from 'sentry/components/dropdownMenu';
-import SearchBar from 'sentry/components/events/searchBar';
 import * as Layout from 'sentry/components/layouts/thirds';
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import {DatePageFilter} from 'sentry/components/organizations/datePageFilter';
@@ -22,11 +19,15 @@ import PageFilterBar from 'sentry/components/organizations/pageFilterBar';
 import {normalizeDateTimeParams} from 'sentry/components/organizations/pageFilters/parse';
 import {ProjectPageFilter} from 'sentry/components/organizations/projectPageFilter';
 import * as TeamKeyTransactionManager from 'sentry/components/performance/teamKeyTransactionsManager';
+import {TransactionSearchQueryBuilder} from 'sentry/components/performance/transactionSearchQueryBuilder';
 import {IconCheckmark, IconClose} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, Project} from 'sentry/types';
+import type {InjectedRouter} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import {getUtcToLocalDateObject} from 'sentry/utils/dates';
 import type EventView from 'sentry/utils/discover/eventView';
 import {WebVital} from 'sentry/utils/fields';
@@ -175,7 +176,7 @@ function VitalDetailContent(props: Props) {
   function renderContent(vital: WebVital) {
     const {location, organization, eventView, projects} = props;
 
-    const {fields, start, end, statsPeriod, environment, project} = eventView;
+    const {start, end, statsPeriod, environment, project} = eventView;
 
     const query = decodeScalar(location.query.query, '');
     const orgSlug = organization.slug;
@@ -196,14 +197,14 @@ function VitalDetailContent(props: Props) {
             <EnvironmentPageFilter />
             <DatePageFilter />
           </PageFilterBar>
-          <SearchBar
-            searchSource="performance_vitals"
-            organization={organization}
-            projectIds={project}
-            query={query}
-            fields={fields}
-            onSearch={handleSearch}
-          />
+          <StyledSearchBarWrapper>
+            <TransactionSearchQueryBuilder
+              projects={project}
+              initialQuery={query}
+              onSearch={handleSearch}
+              searchSource="performance_vitals"
+            />
+          </StyledSearchBarWrapper>
         </FilterActions>
         <VitalChart
           organization={organization}
@@ -328,5 +329,17 @@ const FilterActions = styled('div')`
 
   @media (min-width: ${p => p.theme.breakpoints.small}) {
     grid-template-columns: auto 1fr;
+  }
+`;
+
+const StyledSearchBarWrapper = styled('div')`
+  @media (min-width: ${p => p.theme.breakpoints.small}) {
+    order: 1;
+    grid-column: 1/6;
+  }
+
+  @media (min-width: ${p => p.theme.breakpoints.xlarge}) {
+    order: initial;
+    grid-column: auto;
   }
 `;

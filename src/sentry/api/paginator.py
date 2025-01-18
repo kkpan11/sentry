@@ -2,7 +2,7 @@ import bisect
 import functools
 import logging
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -43,6 +43,16 @@ def count_hits(queryset, max_hits):
 
 class BadPaginationError(Exception):
     pass
+
+
+class MissingPaginationError(Exception):
+    error_message: str = """Response is not paginated correctly in {func_name}.
+                    List API response should be paginated, as lack of pagination can break the product in the future due to eventual growth.
+                    Learn more about pagination in https://develop.sentry.dev/api/concepts/#paginating-responses and reach out to #discuss-api if you have any questions."""
+
+    def __init__(self, func_name: str) -> None:
+        self.func_name = func_name
+        super().__init__(self.error_message.format(func_name=func_name))
 
 
 class BasePaginator:
@@ -400,11 +410,17 @@ def reverse_bisect_left(a, x, lo=0, hi=None):
     return lo
 
 
-class SequencePaginator:
-    def __init__(self, data, reverse=False, max_limit=MAX_LIMIT, on_results=None):
-        self.scores, self.values = (
-            map(list, zip(*sorted(data, reverse=reverse))) if data else ([], [])
-        )
+class SequencePaginator[T]:
+    def __init__(
+        self,
+        data: Iterable[tuple[int, T]],
+        reverse: bool = False,
+        max_limit: int = MAX_LIMIT,
+        on_results=None,
+    ):
+        data = sorted(data, reverse=reverse)
+        self.scores = [score for score, _ in data]
+        self.values = [value for _, value in data]
         self.reverse = reverse
         self.search = functools.partial(
             reverse_bisect_left if reverse else bisect.bisect_left, self.scores
@@ -527,7 +543,7 @@ class GenericOffsetPaginator:
             prev=Cursor(0, max(0, offset - limit), True, offset > 0),
             next=Cursor(0, max(0, offset + limit), False, has_more),
         )
-        # TODO use Cursor.value as the `end` argument to data_fn() so that
+        # TODO: use Cursor.value as the `end` argument to data_fn() so that
         # subsequent pages returned using these cursors are using the same end
         # date for queries, this should stop drift from new incoming events.
 
@@ -572,13 +588,13 @@ class CombinedQuerysetPaginator:
 
     multiplier = 1000000  # Use microseconds for date keys.
     using_dates = False
-    model_key_map = {}
 
     def __init__(self, intermediaries, desc=False, on_results=None, case_insensitive=False):
         self.desc = desc
         self.intermediaries = intermediaries
         self.on_results = on_results
         self.case_insensitive = case_insensitive
+        self.model_key_map = {}
         for intermediary in list(self.intermediaries):
             if intermediary.is_empty:
                 self.intermediaries.remove(intermediary)
@@ -649,6 +665,8 @@ class CombinedQuerysetPaginator:
             sort_keys = []
             sort_keys.append(self.get_item_key(item))
             if len(self.model_key_map.get(type(item))) > 1:
+                # XXX: This doesn't do anything - it just uses a column name as the sort key. It should be pulling the
+                # value of the other keys out instead.
                 sort_keys.extend(iter(self.model_key_map.get(type(item))[1:]))
             sort_keys.append(type(item).__name__)
             return tuple(sort_keys)
@@ -763,7 +781,7 @@ class CallbackPaginator:
         self.callback = callback
         self.on_results = on_results
 
-    def get_result(self, limit: int, cursor: Cursor = None):
+    def get_result(self, limit: int, cursor: Cursor | None = None):
         if cursor is None:
             cursor = Cursor(0, 0, 0)
 

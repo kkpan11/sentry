@@ -10,8 +10,9 @@ import {Tooltip} from 'sentry/components/tooltip';
 import {t, tct} from 'sentry/locale';
 import GroupStore from 'sentry/stores/groupStore';
 import {space} from 'sentry/styles/space';
-import type {Member, Project} from 'sentry/types';
 import type {IssueAlertRule, UnsavedIssueAlertRule} from 'sentry/types/alerts';
+import type {Member} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import useApi from 'sentry/utils/useApi';
 import {useIsMountedRef} from 'sentry/utils/useIsMountedRef';
 import useOrganization from 'sentry/utils/useOrganization';
@@ -21,7 +22,7 @@ import PreviewTable from './previewTable';
 const SENTRY_ISSUE_ALERT_DOCS_URL =
   'https://docs.sentry.io/product/alerts/alert-types/#issue-alerts';
 
-function PreviewText({issueCount, previewError}) {
+function PreviewText({issueCount, previewError}: any) {
   if (previewError) {
     return (
       <Fragment>
@@ -114,7 +115,7 @@ export function PreviewIssues({members, rule, project}: PreviewIssuesProps) {
 
           const hits = resp?.getResponseHeader('X-Hits');
           const count = typeof hits !== 'undefined' && hits ? parseInt(hits, 10) : 0;
-          setPreviewGroups(data.map(g => g.id));
+          setPreviewGroups(data.map((g: any) => g.id));
           setPreviewError(false);
           setPageLinks(resp?.getResponseHeader('Link') ?? '');
           setIssueCount(count);

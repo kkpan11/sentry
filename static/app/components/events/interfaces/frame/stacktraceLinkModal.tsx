@@ -14,7 +14,9 @@ import List from 'sentry/components/list';
 import TextCopyInput from 'sentry/components/textCopyInput';
 import {t, tct} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Integration, Organization, Project} from 'sentry/types';
+import type {Integration} from 'sentry/types/integrations';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import {uniq} from 'sentry/utils/array/uniq';
 import {useApiQuery} from 'sentry/utils/queryClient';
@@ -85,10 +87,10 @@ function StacktraceLinkModal({
   // If they have more than one, they'll have to navigate themselves
   const hasOneSourceCodeIntegration = sourceCodeProviders.length === 1;
   const sourceUrl = hasOneSourceCodeIntegration
-    ? `https://${sourceCodeProviders[0].domainName}`
+    ? `https://${sourceCodeProviders[0]!.domainName}`
     : undefined;
   const providerName = hasOneSourceCodeIntegration
-    ? sourceCodeProviders[0].name
+    ? sourceCodeProviders[0]!.name
     : t('source code');
 
   const onManualSetup = () => {
@@ -97,7 +99,7 @@ function StacktraceLinkModal({
       setup_type: 'manual',
       provider:
         sourceCodeProviders.length === 1
-          ? sourceCodeProviders[0].provider.name
+          ? sourceCodeProviders[0]!.provider.name
           : 'unknown',
       organization,
     });
@@ -169,7 +171,7 @@ function StacktraceLinkModal({
                           onClick={onManualSetup}
                           to={
                             hasOneSourceCodeIntegration
-                              ? `/settings/${organization.slug}/integrations/${sourceCodeProviders[0].provider.key}/${sourceCodeProviders[0].id}/`
+                              ? `/settings/${organization.slug}/integrations/${sourceCodeProviders[0]!.provider.key}/${sourceCodeProviders[0]!.id}/`
                               : `/settings/${organization.slug}/integrations/`
                           }
                         />
@@ -198,7 +200,7 @@ function StacktraceLinkModal({
                     ? tct('Go to [link]', {
                         link: (
                           <ExternalLink href={sourceUrl}>
-                            {sourceCodeProviders[0].provider.name}
+                            {sourceCodeProviders[0]!.provider.name}
                           </ExternalLink>
                         ),
                       })

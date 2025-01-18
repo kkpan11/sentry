@@ -1,11 +1,11 @@
-import {Component, Fragment} from 'react';
-import type {RouteContextInterface} from 'react-router';
-import {browserHistory} from 'react-router';
+import type React from 'react';
+import {Component, Fragment, type ReactNode} from 'react';
 import styled from '@emotion/styled';
 import type {Location, LocationDescriptor, LocationDescriptorObject} from 'history';
 import groupBy from 'lodash/groupBy';
 
 import {Client} from 'sentry/api';
+import {LinkButton} from 'sentry/components/button';
 import type {GridColumn} from 'sentry/components/gridEditable';
 import GridEditable, {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable';
 import SortLink from 'sentry/components/gridEditable/sortLink';
@@ -13,9 +13,14 @@ import Link from 'sentry/components/links/link';
 import Pagination from 'sentry/components/pagination';
 import QuestionTooltip from 'sentry/components/questionTooltip';
 import {Tooltip} from 'sentry/components/tooltip';
+import {IconProfiling} from 'sentry/icons';
 import {t, tct} from 'sentry/locale';
-import type {IssueAttachment, Organization} from 'sentry/types';
+import type {IssueAttachment} from 'sentry/types/group';
+import type {RouteContextInterface} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
 import {trackAnalytics} from 'sentry/utils/analytics';
+import toArray from 'sentry/utils/array/toArray';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import type {TableData, TableDataRow} from 'sentry/utils/discover/discoverQuery';
 import DiscoverQuery from 'sentry/utils/discover/discoverQuery';
 import type EventView from 'sentry/utils/discover/eventView';
@@ -27,23 +32,44 @@ import {
   isSpanOperationBreakdownField,
   SPAN_OP_RELATIVE_BREAKDOWN_FIELD,
 } from 'sentry/utils/discover/fields';
+import {generateLinkToEventInTraceView} from 'sentry/utils/discover/urls';
 import ViewReplayLink from 'sentry/utils/discover/viewReplayLink';
+import {isEmptyObject} from 'sentry/utils/object/isEmptyObject';
 import parseLinkHeader from 'sentry/utils/parseLinkHeader';
 import {VisuallyCompleteWithData} from 'sentry/utils/performanceForSentry';
 import CellAction, {Actions, updateQuery} from 'sentry/views/discover/table/cellAction';
 import type {TableColumn} from 'sentry/views/discover/table/types';
+import type {DomainViewFilters} from 'sentry/views/insights/pages/useFilters';
 
 import {COLUMN_TITLES} from '../../data';
+import {TraceViewSources} from '../../newTraceDetails/traceHeader/breadcrumbs';
+import Tab from '../tabs';
 import {
   generateProfileLink,
   generateReplayLink,
   generateTraceLink,
-  generateTransactionLink,
   normalizeSearchConditions,
 } from '../utils';
 
 import type {TitleProps} from './operationSort';
 import OperationSort from './operationSort';
+
+function shouldRenderColumn(containsSpanOpsBreakdown: boolean, col: string): boolean {
+  if (containsSpanOpsBreakdown && isSpanOperationBreakdownField(col)) {
+    return false;
+  }
+
+  if (
+    col === 'profiler.id' ||
+    col === 'thread.id' ||
+    col === 'precise.start_ts' ||
+    col === 'precise.finish_ts'
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 function OperationTitle({onClick}: TitleProps) {
   return (
@@ -67,14 +93,23 @@ type Props = {
   routes: RouteContextInterface['routes'];
   setError: (msg: string | undefined) => void;
   transactionName: string;
+  applyEnvironmentFilter?: boolean;
   columnTitles?: string[];
   customColumns?: ('attachments' | 'minidump')[];
+  domainViewFilters?: DomainViewFilters;
   excludedTags?: string[];
+  hidePagination?: boolean;
   isEventLoading?: boolean;
   isRegressionIssue?: boolean;
   issueId?: string;
   projectSlug?: string;
   referrer?: string;
+  renderTableHeader?: (props: {
+    isPending: boolean;
+    pageEventsCount: number;
+    pageLinks: string | null;
+    totalEventsCount: ReactNode;
+  }) => ReactNode;
 };
 
 type State = {
@@ -97,7 +132,8 @@ class EventsTable extends Component<Props, State> {
 
   handleCellAction = (column: TableColumn<keyof TableDataRow>) => {
     return (action: Actions, value: React.ReactText) => {
-      const {eventView, location, organization, excludedTags} = this.props;
+      const {eventView, location, organization, excludedTags, applyEnvironmentFilter} =
+        this.props;
 
       trackAnalytics('performance_views.transactionEvents.cellaction', {
         organization,
@@ -113,6 +149,29 @@ class EventsTable extends Component<Props, State> {
       }
 
       updateQuery(searchConditions, action, column, value);
+
+      if (applyEnvironmentFilter && column.key === 'environment') {
+        let newEnvs = toArray(location.query.environment);
+
+        if (action === Actions.ADD) {
+          if (!newEnvs.includes(String(value))) {
+            newEnvs.push(String(value));
+          }
+        } else {
+          newEnvs = newEnvs.filter(env => env !== value);
+        }
+
+        // Updates the environment filter, instead of relying on the search query
+        browserHistory.push({
+          pathname: location.pathname,
+          query: {
+            ...location.query,
+            cursor: undefined,
+            environment: newEnvs,
+          },
+        });
+        return;
+      }
 
       browserHistory.push({
         pathname: location.pathname,
@@ -160,12 +219,30 @@ class EventsTable extends Component<Props, State> {
       const {issueId, isRegressionIssue} = this.props;
       const isIssue: boolean = !!issueId;
       let target: LocationDescriptor = {};
+      const locationWithTab = {...location, query: {...location.query, tab: Tab.EVENTS}};
       // TODO: set referrer properly
       if (isIssue && !isRegressionIssue && field === 'id') {
         target.pathname = `/organizations/${organization.slug}/issues/${issueId}/events/${dataRow.id}/`;
       } else {
-        const generateLink = field === 'id' ? generateTransactionLink : generateTraceLink;
-        target = generateLink(transactionName)(organization, dataRow, location.query);
+        if (field === 'id') {
+          target = generateLinkToEventInTraceView({
+            traceSlug: dataRow.trace?.toString()!,
+            projectSlug: dataRow['project.name']?.toString()!,
+            eventId: dataRow.id,
+            timestamp: dataRow.timestamp!,
+            location: locationWithTab,
+            organization,
+            transactionName,
+            source: TraceViewSources.PERFORMANCE_TRANSACTION_SUMMARY,
+            view: this.props.domainViewFilters?.view,
+          });
+        } else {
+          target = generateTraceLink(transactionName, this.props.domainViewFilters?.view)(
+            organization,
+            dataRow,
+            locationWithTab
+          );
+        }
       }
 
       return (
@@ -193,7 +270,7 @@ class EventsTable extends Component<Props, State> {
           allowActions={allowActions}
         >
           {target ? (
-            <ViewReplayLink replayId={dataRow.replayId} to={target}>
+            <ViewReplayLink replayId={dataRow.replayId!} to={target}>
               {rendered}
             </ViewReplayLink>
           ) : (
@@ -223,7 +300,15 @@ class EventsTable extends Component<Props, State> {
             handleCellAction={this.handleCellAction(column)}
             allowActions={allowActions}
           >
-            {target ? <Link to={target}>{rendered}</Link> : rendered}
+            <div>
+              <LinkButton
+                disabled={!target || isEmptyObject(target)}
+                to={target || {}}
+                size="xs"
+              >
+                <IconProfiling size="xs" />
+              </LinkButton>
+            </div>
           </CellAction>
         </Tooltip>
       );
@@ -360,7 +445,7 @@ class EventsTable extends Component<Props, State> {
     totalEventsView.fields = [{field: 'count()', width: -1}];
 
     const {widths} = this.state;
-    const containsSpanOpsBreakdown = eventView
+    const containsSpanOpsBreakdown = !!eventView
       .getColumns()
       .find(
         (col: TableColumn<React.ReactText>) =>
@@ -369,9 +454,8 @@ class EventsTable extends Component<Props, State> {
 
     const columnOrder = eventView
       .getColumns()
-      .filter(
-        (col: TableColumn<React.ReactText>) =>
-          !containsSpanOpsBreakdown || !isSpanOperationBreakdownField(col.name)
+      .filter((col: TableColumn<React.ReactText>) =>
+        shouldRenderColumn(containsSpanOpsBreakdown, col.name)
       )
       .map((col: TableColumn<React.ReactText>, i: number) => {
         if (typeof widths[i] === 'number') {
@@ -465,7 +549,7 @@ class EventsTable extends Component<Props, State> {
                   tableData ??= {data: []};
                   const pageEventsCount = tableData?.data?.length ?? 0;
                   const parsedPageLinks = parseLinkHeader(pageLinks);
-                  const cursor = parsedPageLinks?.next?.cursor;
+                  const cursor = parsedPageLinks?.next!?.cursor;
                   const shouldFetchAttachments: boolean =
                     organization.features.includes('event-attachments') &&
                     !!this.props.issueId &&
@@ -489,6 +573,14 @@ class EventsTable extends Component<Props, State> {
                         id="TransactionEvents-EventsTable"
                         hasData={!!tableData?.data?.length}
                       >
+                        {this.props.renderTableHeader
+                          ? this.props.renderTableHeader({
+                              isPending: isDiscoverQueryLoading,
+                              pageLinks,
+                              pageEventsCount,
+                              totalEventsCount,
+                            })
+                          : null}
                         <GridEditable
                           isLoading={
                             isTotalEventsLoading ||
@@ -506,14 +598,15 @@ class EventsTable extends Component<Props, State> {
                             ) as any,
                             renderBodyCell: this.renderBodyCellWithData(tableData) as any,
                           }}
-                          location={location}
                         />
                       </VisuallyCompleteWithData>
-                      <Pagination
-                        disabled={isDiscoverQueryLoading}
-                        caption={paginationCaption}
-                        pageLinks={pageLinks}
-                      />
+                      {this.props.hidePagination ? null : (
+                        <Pagination
+                          disabled={isDiscoverQueryLoading}
+                          caption={paginationCaption}
+                          pageLinks={pageLinks}
+                        />
+                      )}
                     </Fragment>
                   );
                 }}

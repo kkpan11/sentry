@@ -1,7 +1,7 @@
 import {useMemo} from 'react';
 import styled from '@emotion/styled';
 import type {Location} from 'history';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 import EmptyStateWarning from 'sentry/components/emptyStateWarning';
 import {DataSection} from 'sentry/components/events/styles';
@@ -10,7 +10,7 @@ import GridEditable, {COL_WIDTH_UNDEFINED} from 'sentry/components/gridEditable'
 import LoadingIndicator from 'sentry/components/loadingIndicator';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Event} from 'sentry/types';
+import type {Event} from 'sentry/types/event';
 import {defined} from 'sentry/utils';
 import {useDiscoverQuery} from 'sentry/utils/discover/discoverQuery';
 import EventView from 'sentry/utils/discover/eventView';
@@ -84,6 +84,7 @@ function renderBodyCell({
       />
     );
   }
+  // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
   return row[column.key];
 }
 
@@ -99,7 +100,7 @@ function EventSpanOpBreakdown({event}: {event: Event}) {
 
   const {
     data: postBreakpointData,
-    isLoading: postBreakpointIsLoading,
+    isPending: postBreakpointIsLoading,
     isError: postBreakpointIsError,
   } = useDiscoverQuery({
     eventView: postBreakpointEventView,
@@ -110,7 +111,7 @@ function EventSpanOpBreakdown({event}: {event: Event}) {
 
   const {
     data: preBreakpointData,
-    isLoading: preBreakpointIsLoading,
+    isPending: preBreakpointIsLoading,
     isError: preBreakpointIsError,
   } = useDiscoverQuery({
     eventView: preBreakpointEventView,
@@ -121,13 +122,13 @@ function EventSpanOpBreakdown({event}: {event: Event}) {
 
   const spanOpDiffs: SpanOpDiff[] = SPAN_OPS.map(op => {
     const preBreakpointValue =
-      (preBreakpointData?.data[0][`p95(spans.${op})`] as string) || undefined;
+      (preBreakpointData?.data[0]![`p95(spans.${op})`] as string) || undefined;
     const preBreakpointValueAsNumber = preBreakpointValue
       ? parseInt(preBreakpointValue, 10)
       : 0;
 
     const postBreakpointValue =
-      (postBreakpointData?.data[0][`p95(spans.${op})`] as string) || undefined;
+      (postBreakpointData?.data[0]![`p95(spans.${op})`] as string) || undefined;
     const postBreakpointValueAsNumber = postBreakpointValue
       ? parseInt(postBreakpointValue, 10)
       : 0;
@@ -164,7 +165,6 @@ function EventSpanOpBreakdown({event}: {event: Event}) {
       <GridEditable
         isLoading={false}
         data={spanOpDiffs}
-        location={location}
         columnOrder={[
           {key: 'span_op', name: t('Span Operation'), width: 200},
           {key: 'p95', name: t('p95'), width: COL_WIDTH_UNDEFINED},

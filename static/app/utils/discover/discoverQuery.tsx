@@ -52,11 +52,11 @@ function shouldRefetchData(
 }
 
 function DiscoverQuery(props: DiscoverQueryComponentProps) {
-  const afterFetch = (data, _) => {
+  const afterFetch = (data: any, _: any) => {
     const {fields, ...otherMeta} = data.meta ?? {};
     return {
       ...data,
-      meta: {...fields, ...otherMeta},
+      meta: {...fields, ...otherMeta, fields},
     };
   };
   return (
@@ -70,11 +70,11 @@ function DiscoverQuery(props: DiscoverQueryComponentProps) {
 }
 
 export function useDiscoverQuery(props: Omit<DiscoverQueryComponentProps, 'children'>) {
-  const afterFetch = (data, _) => {
+  const afterFetch = (data: any, _: any) => {
     const {fields, ...otherMeta} = data.meta ?? {};
     return {
       ...data,
-      meta: {...fields, ...otherMeta},
+      meta: {...fields, ...otherMeta, fields},
     };
   };
 

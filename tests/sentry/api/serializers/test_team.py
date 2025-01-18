@@ -3,17 +3,16 @@ from unittest import mock
 from django.conf import settings
 
 from sentry.api.serializers import serialize
+from sentry.api.serializers.models.project import ProjectSerializer
 from sentry.api.serializers.models.team import TeamSCIMSerializer, TeamWithProjectsSerializer
 from sentry.app import env
 from sentry.models.organizationmember import InviteStatus
 from sentry.testutils.cases import TestCase
-from sentry.testutils.silo import region_silo_test
 
 TEAM_CONTRIBUTOR = settings.SENTRY_TEAM_ROLES[0]
 TEAM_ADMIN = settings.SENTRY_TEAM_ROLES[1]
 
 
-@region_silo_test
 class TeamSerializerTest(TestCase):
     def test_simple(self):
         user = self.create_user(username="foo")
@@ -245,7 +244,6 @@ class TeamSerializerTest(TestCase):
             assert result["teamRole"] is None
 
 
-@region_silo_test
 class TeamWithProjectsSerializerTest(TestCase):
     def test_simple(self):
         user = self.create_user(username="foo")
@@ -255,7 +253,9 @@ class TeamWithProjectsSerializerTest(TestCase):
         project2 = self.create_project(teams=[team], organization=organization, name="bar")
 
         result = serialize(team, user, TeamWithProjectsSerializer())
-        serialized_projects = serialize([project2, project], user)
+        serialized_projects = serialize(
+            [project2, project], user, ProjectSerializer(collapse=["unusedFeatures"])
+        )
 
         assert result == {
             "id": str(team.id),
@@ -275,7 +275,6 @@ class TeamWithProjectsSerializerTest(TestCase):
         }
 
 
-@region_silo_test
 class TeamSCIMSerializerTest(TestCase):
     def test_simple_with_members(self):
         user = self.create_user(username="foo")

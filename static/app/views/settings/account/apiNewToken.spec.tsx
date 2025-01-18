@@ -1,23 +1,17 @@
-import selectEvent from 'react-select-event';
-import {RouterContextFixture} from 'sentry-fixture/routerContextFixture';
-
 import {render, screen, userEvent, waitFor} from 'sentry-test/reactTestingLibrary';
+import selectEvent from 'sentry-test/selectEvent';
 
 import ApiNewToken from 'sentry/views/settings/account/apiNewToken';
 
 describe('ApiNewToken', function () {
   it('renders', function () {
-    render(<ApiNewToken />, {
-      context: RouterContextFixture(),
-    });
+    render(<ApiNewToken />);
   });
 
-  it('renders with disabled "Create Token" button', async function () {
-    render(<ApiNewToken />, {
-      context: RouterContextFixture(),
-    });
+  it('renders with disabled "Create Token" button', function () {
+    render(<ApiNewToken />);
 
-    expect(await screen.getByRole('button', {name: 'Create Token'})).toBeDisabled();
+    expect(screen.getByRole('button', {name: 'Create Token'})).toBeDisabled();
   });
 
   it('submits with correct hierarchical scopes', async function () {
@@ -27,12 +21,10 @@ describe('ApiNewToken', function () {
       url: `/api-tokens/`,
     });
 
-    render(<ApiNewToken />, {
-      context: RouterContextFixture(),
-    });
-    const createButton = await screen.getByRole('button', {name: 'Create Token'});
+    render(<ApiNewToken />);
+    const createButton = screen.getByRole('button', {name: 'Create Token'});
 
-    const selectByValue = (name, value) =>
+    const selectByValue = (name: string, value: string) =>
       selectEvent.select(screen.getByRole('textbox', {name}), value);
 
     // Assigning Admin here will also grant read + write access to the resource
@@ -82,12 +74,10 @@ describe('ApiNewToken', function () {
       url: `/api-tokens/`,
     });
 
-    render(<ApiNewToken />, {
-      context: RouterContextFixture(),
-    });
+    render(<ApiNewToken />);
     const createButton = screen.getByRole('button', {name: 'Create Token'});
 
-    const selectByValue = (name, value) =>
+    const selectByValue = (name: string, value: string) =>
       selectEvent.select(screen.getByRole('textbox', {name}), value);
 
     await selectByValue('Project', 'Admin');
@@ -122,12 +112,10 @@ describe('ApiNewToken', function () {
       url: `/api-tokens/`,
     });
 
-    render(<ApiNewToken />, {
-      context: RouterContextFixture(),
-    });
+    render(<ApiNewToken />);
     const createButton = screen.getByRole('button', {name: 'Create Token'});
 
-    const selectByValue = (name, value) =>
+    const selectByValue = (name: string, value: string) =>
       selectEvent.select(screen.getByRole('textbox', {name}), value);
 
     await selectByValue('Project', 'Admin');

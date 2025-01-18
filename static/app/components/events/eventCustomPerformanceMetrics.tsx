@@ -7,8 +7,8 @@ import Panel from 'sentry/components/panels/panel';
 import {IconEllipsis} from 'sentry/icons';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
 import type {Event} from 'sentry/types/event';
+import type {Organization} from 'sentry/types/organization';
 import EventView from 'sentry/utils/discover/eventView';
 import {
   DURATION_UNITS,
@@ -18,6 +18,8 @@ import {
 } from 'sentry/utils/discover/fieldRenderers';
 import {isCustomMeasurement} from 'sentry/views/dashboards/utils';
 import {transactionSummaryRouteWithQuery} from 'sentry/views/performance/transactionSummary/utils';
+
+import {Tooltip} from '../tooltip';
 
 export enum EventDetailPageSource {
   PERFORMANCE = 'performance',
@@ -83,11 +85,13 @@ type EventCustomPerformanceMetricProps = Props & {
   name: string;
 };
 
-export function getFieldTypeFromUnit(unit) {
+export function getFieldTypeFromUnit(unit: any) {
   if (unit) {
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     if (DURATION_UNITS[unit]) {
       return 'duration';
     }
+    // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
     if (SIZE_UNITS[unit]) {
       return 'size';
     }
@@ -147,8 +151,10 @@ export function EventCustomPerformanceMetric({
   let customMetricValue = value;
   if (typeof value === 'number' && unit && customMetricValue) {
     if (Object.keys(SIZE_UNITS).includes(unit)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       customMetricValue *= SIZE_UNITS[unit];
     } else if (Object.keys(DURATION_UNITS).includes(unit)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       customMetricValue *= DURATION_UNITS[unit];
     }
   }
@@ -241,14 +247,18 @@ export function TraceEventCustomPerformanceMetric({
   let customMetricValue = value;
   if (typeof value === 'number' && unit && customMetricValue) {
     if (Object.keys(SIZE_UNITS).includes(unit)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       customMetricValue *= SIZE_UNITS[unit];
     } else if (Object.keys(DURATION_UNITS).includes(unit)) {
+      // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
       customMetricValue *= DURATION_UNITS[unit];
     }
   }
   return (
     <TraceStyledPanel>
-      <div>{name}</div>
+      <Tooltip title={name} showOnlyOnOverflow>
+        <StyledMeasurementsName>{name}</StyledMeasurementsName>
+      </Tooltip>
       <div>{rendered}</div>
       <div>
         <StyledDropdownMenuControl
@@ -328,5 +338,11 @@ const StyledPanel = styled(Panel)`
 `;
 
 const StyledDropdownMenuControl = styled(DropdownMenu)`
+  display: block;
   margin-left: auto;
+`;
+
+const StyledMeasurementsName = styled('div')`
+  max-width: 200px;
+  ${p => p.theme.overflowEllipsis};
 `;

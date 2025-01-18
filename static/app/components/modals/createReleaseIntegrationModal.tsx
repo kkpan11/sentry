@@ -6,12 +6,13 @@ import FieldFromConfig from 'sentry/components/forms/fieldFromConfig';
 import Form from 'sentry/components/forms/form';
 import type {Field} from 'sentry/components/forms/types';
 import {t} from 'sentry/locale';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import useApi from 'sentry/utils/useApi';
 
 export type CreateReleaseIntegrationModalOptions = {
   onCancel: () => void;
-  onCreateSuccess: (integration) => void;
+  onCreateSuccess: (integration: any) => void;
   organization: Organization;
   project: Project;
 };

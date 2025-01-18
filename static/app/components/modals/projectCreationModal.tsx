@@ -22,7 +22,8 @@ import TeamSelector from 'sentry/components/teamSelector';
 import {t} from 'sentry/locale';
 import ProjectsStore from 'sentry/stores/projectsStore';
 import {space} from 'sentry/styles/space';
-import type {OnboardingSelectedSDK, Team} from 'sentry/types';
+import type {OnboardingSelectedSDK} from 'sentry/types/onboarding';
+import type {Team} from 'sentry/types/organization';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import slugify from 'sentry/utils/slugify';
 import useApi from 'sentry/utils/useApi';
@@ -87,6 +88,7 @@ export default function ProjectCreationModal({
           name: projectName,
           platform: platform.key,
           default_rules: defaultRules ?? true,
+          origin: 'ui',
         },
       });
 
@@ -181,7 +183,7 @@ export default function ProjectCreationModal({
                 clearable={false}
                 value={team}
                 placeholder={t('Select a Team')}
-                onChange={choice => setTeam(choice.value)}
+                onChange={(choice: any) => setTeam(choice.value)}
                 teamFilter={(tm: Team) => tm.access.includes('team:admin')}
               />
             </div>
@@ -261,5 +263,5 @@ const TeamInput = styled(TeamSelector)`
 const Subtitle = styled('p')`
   margin: ${space(2)} 0 ${space(1)} 0;
   font-size: ${p => p.theme.fontSizeExtraLarge};
-  font-weight: bold;
+  font-weight: ${p => p.theme.fontWeightBold};
 `;

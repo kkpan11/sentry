@@ -3,8 +3,9 @@ import {GroupFixture} from 'sentry-fixture/group';
 import {ProjectFixture} from 'sentry-fixture/project';
 
 import GroupStore from 'sentry/stores/groupStore';
-import type {Group, GroupStats, TimeseriesValue} from 'sentry/types';
-import {GroupActivityType} from 'sentry/types';
+import type {TimeseriesValue} from 'sentry/types/core';
+import type {Group, GroupStats} from 'sentry/types/group';
+import {GroupActivityType} from 'sentry/types/group';
 
 const MOCK_PROJECT = ProjectFixture();
 
@@ -163,6 +164,14 @@ describe('GroupStore', function () {
     });
   });
 
+  describe('getState()', function () {
+    it('returns a stable reference', () => {
+      GroupStore.add([g('1'), g('2')]);
+      const state = GroupStore.getState();
+      expect(Object.is(state, GroupStore.getState())).toBe(true);
+    });
+  });
+
   describe('update methods', function () {
     beforeEach(function () {
       jest.spyOn(GroupStore, 'trigger');
@@ -249,7 +258,7 @@ describe('GroupStore', function () {
           }),
         ];
         GroupStore.updateActivity('1', '1', {text: 'Updated Text'});
-        expect(GroupStore.items[0].activity[0].data).toEqual({text: 'Updated Text'});
+        expect(GroupStore.items[0]!.activity[0]!.data).toEqual({text: 'Updated Text'});
       });
     });
   });

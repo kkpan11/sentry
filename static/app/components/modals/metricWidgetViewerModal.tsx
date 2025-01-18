@@ -1,46 +1,46 @@
 import {Fragment, useCallback, useMemo, useState} from 'react';
 import {css} from '@emotion/react';
-import styled from '@emotion/styled';
 
 import type {ModalRenderProps} from 'sentry/actionCreators/modal';
-import {navigateTo} from 'sentry/actionCreators/navigation';
 import {Button, LinkButton} from 'sentry/components/button';
 import ButtonBar from 'sentry/components/buttonBar';
-import type {MenuItemProps} from 'sentry/components/dropdownMenu';
-import {DropdownMenu} from 'sentry/components/dropdownMenu';
-import Input from 'sentry/components/input';
+import LoadingIndicator from 'sentry/components/loadingIndicator';
+import {
+  MetricWidgetTitle,
+  type MetricWidgetTitleState,
+} from 'sentry/components/modals/metricWidgetViewerModal/header';
+import {Queries} from 'sentry/components/modals/metricWidgetViewerModal/queries';
+import {MetricVisualization} from 'sentry/components/modals/metricWidgetViewerModal/visualization';
 import type {WidgetViewerModalOptions} from 'sentry/components/modals/widgetViewerModal';
-import {
-  IconAdd,
-  IconCheckmark,
-  IconClose,
-  IconEdit,
-  IconEllipsis,
-  IconSettings,
-  IconSiren,
-} from 'sentry/icons';
 import {t} from 'sentry/locale';
-import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
-import {getDdmUrl, getWidgetTitle, isCustomMetric} from 'sentry/utils/metrics';
-import {emptyWidget} from 'sentry/utils/metrics/constants';
-import type {MetricsQuery, MetricWidgetQueryParams} from 'sentry/utils/metrics/types';
-import useOrganization from 'sentry/utils/useOrganization';
+import type {Organization} from 'sentry/types/organization';
+import {defined} from 'sentry/utils';
+import {getMetricsUrl} from 'sentry/utils/metrics';
+import {toDisplayType} from 'sentry/utils/metrics/dashboard';
+import {hasCustomMetrics} from 'sentry/utils/metrics/features';
+import {parseMRI} from 'sentry/utils/metrics/mri';
+import {MetricExpressionType} from 'sentry/utils/metrics/types';
+import {useVirtualMetricsContext} from 'sentry/utils/metrics/virtualMetricsContext';
 import usePageFilters from 'sentry/utils/usePageFilters';
-import useRouter from 'sentry/utils/useRouter';
-import {WidgetDescription} from 'sentry/views/dashboards/widgetCard';
-import {getCreateAlert} from 'sentry/views/ddm/contextMenu';
-import {Query} from 'sentry/views/ddm/queries';
-import {MetricDetails} from 'sentry/views/ddm/widgetDetails';
-import {OrganizationContext} from 'sentry/views/organizationContext';
-
+import type {
+  DashboardMetricsEquation,
+  DashboardMetricsQuery,
+  Order,
+} from 'sentry/views/dashboards/metrics/types';
 import {
-  convertToDashboardWidget,
-  convertToMetricWidget,
-  toMetricDisplayType,
-} from '../../utils/metrics/dashboard';
-import {MetricWidget} from '../../views/ddm/widget';
-import {Tooltip} from '../tooltip';
+  expressionsToWidget,
+  formatAlias,
+  getMetricEquations,
+  getMetricQueries,
+  getMetricWidgetTitle,
+  getVirtualAlias,
+  isVirtualAlias,
+  useGenerateExpressionId,
+} from 'sentry/views/dashboards/metrics/utils';
+import {DisplayType} from 'sentry/views/dashboards/types';
+import {MetricsBetaEndAlert} from 'sentry/views/metrics/metricsBetaEndAlert';
+import {MetricDetails} from 'sentry/views/metrics/widgetDetails';
+import {OrganizationContext} from 'sentry/views/organizationContext';
 
 interface Props extends ModalRenderProps, WidgetViewerModalOptions {
   organization: Organization;
@@ -53,131 +53,311 @@ function MetricWidgetViewerModal({
   Body,
   Header,
   closeModal,
+  CloseButton,
   onMetricWidgetEdit,
+  dashboardFilters,
 }: Props) {
   const {selection} = usePageFilters();
-  const [metricWidgetQueries, setMetricWidgetQueries] = useState<
-    MetricWidgetQueryParams[]
-  >(convertToMetricWidget(widget));
-
-  const widgetMQL = useMemo(
-    () => getWidgetTitle(metricWidgetQueries),
-    [metricWidgetQueries]
+  const {resolveVirtualMRI, getVirtualMRIQuery, getExtractionRule, isLoading} =
+    useVirtualMetricsContext();
+  const [userHasModified, setUserHasModified] = useState(false);
+  const [displayType, setDisplayType] = useState(widget.displayType);
+  const [metricQueries, setMetricQueries] = useState<DashboardMetricsQuery[]>(() =>
+    getMetricQueries(widget, dashboardFilters, getVirtualMRIQuery)
   );
 
-  const [editedTitle, setEditedTitle] = useState<string>(widget.title);
-  // If user renamed the widget, dislay that title, otherwise display the MQL
-  const titleToDisplay = editedTitle === '' ? widgetMQL : editedTitle;
-
-  const handleChange = useCallback(
-    (data: Partial<MetricWidgetQueryParams>, index: number) => {
-      setMetricWidgetQueries(curr => {
-        const updated = [...curr];
-        updated[index] = {...updated[index], ...data};
-        return updated;
-      });
-    },
-    [setMetricWidgetQueries]
+  const [metricEquations, setMetricEquations] = useState<DashboardMetricsEquation[]>(() =>
+    getMetricEquations(widget)
   );
+
+  const filteredEquations = useMemo(
+    () => metricEquations.filter(equation => equation.formula !== ''),
+    [metricEquations]
+  );
+
+  const expressions = useMemo(() => {
+    const formattedAliasQueries = metricQueries.map(query => {
+      if (query.alias) {
+        return {...query, alias: formatAlias(query.alias)};
+      }
+      return query;
+    });
+    return [...formattedAliasQueries, ...filteredEquations];
+  }, [metricQueries, filteredEquations]);
+
+  const generateQueryId = useGenerateExpressionId(metricQueries);
+  const generateEquationId = useGenerateExpressionId(metricEquations);
+
+  const widgetMQL = useMemo(() => getMetricWidgetTitle(expressions), [expressions]);
+
+  const [title, setTitle] = useState<MetricWidgetTitleState>({
+    stored: widget.title,
+    edited: widget.title,
+    isEditing: false,
+  });
 
   const handleTitleChange = useCallback(
-    (value: string) => {
-      setEditedTitle(value || widgetMQL);
+    (patch: Partial<MetricWidgetTitleState>) => {
+      setTitle(curr => ({...curr, ...patch}));
+      setUserHasModified(true);
     },
-    [setEditedTitle, widgetMQL]
+    [setTitle]
   );
 
-  const addQuery = useCallback(() => {
-    setMetricWidgetQueries(curr => [...curr, emptyWidget]);
-  }, [setMetricWidgetQueries]);
+  const handleQueryChange = useCallback(
+    (data: Partial<DashboardMetricsQuery>, index: number) => {
+      setMetricQueries(curr => {
+        const updated = [...curr];
+        const currentQuery = updated[index];
+        const updatedQuery = {...updated[index], ...data} as DashboardMetricsQuery;
 
-  const removeQuery = useCallback(
+        const spanAttribute =
+          defined(updatedQuery.condition) &&
+          getExtractionRule(updatedQuery.mri, updatedQuery.condition)?.spanAttribute;
+
+        if (spanAttribute) {
+          const updatedAlias = getVirtualAlias(updatedQuery.aggregation, spanAttribute);
+          if (!updatedQuery.alias) {
+            updatedQuery.alias = updatedAlias;
+          }
+          if (isVirtualAlias(currentQuery!.alias) && isVirtualAlias(updatedQuery.alias)) {
+            updatedQuery.alias = updatedAlias;
+          }
+        }
+
+        updated[index] = updatedQuery;
+        return updated;
+      });
+      setUserHasModified(true);
+    },
+    [setMetricQueries, getExtractionRule]
+  );
+
+  const handleEquationChange = useCallback(
+    (data: Partial<DashboardMetricsEquation>, index: number) => {
+      setMetricEquations(curr => {
+        const updated = [...curr];
+        updated[index] = {...updated[index], ...data} as DashboardMetricsEquation;
+        return updated;
+      });
+      setUserHasModified(true);
+    },
+    [setMetricEquations]
+  );
+
+  const handleOrderChange = useCallback(
+    ({id, order}: {id: number; order: Order}) => {
+      setUserHasModified(true);
+
+      const queryIdx = metricQueries.findIndex(query => query.id === id);
+      if (queryIdx > -1) {
+        setMetricQueries(curr => {
+          return curr.map((query, i) => {
+            const orderBy = i === queryIdx ? order : undefined;
+            return {...query, orderBy};
+          });
+        });
+        return;
+      }
+
+      const equationIdx = filteredEquations.findIndex(equation => equation.id === id);
+      if (equationIdx > -1) {
+        setMetricEquations(curr => {
+          return curr.map((equation, i) => {
+            const orderBy = i === equationIdx ? order : undefined;
+            return {...equation, orderBy};
+          });
+        });
+      }
+    },
+    [filteredEquations, metricQueries]
+  );
+
+  const addQuery = useCallback(
+    (queryIndex?: number) => {
+      setMetricQueries(curr => {
+        const query = metricQueries[queryIndex ?? metricQueries.length - 1];
+        return [
+          ...(displayType === DisplayType.BIG_NUMBER
+            ? curr.map(q => ({...q, isHidden: true}))
+            : curr),
+          {
+            ...query!,
+            id: generateQueryId(),
+          },
+        ];
+      });
+      setUserHasModified(true);
+    },
+    [displayType, generateQueryId, metricQueries]
+  );
+
+  const addEquation = useCallback(() => {
+    setMetricEquations(curr => {
+      return [
+        ...curr,
+        {
+          formula: '',
+          name: '',
+          id: generateEquationId(),
+          type: MetricExpressionType.EQUATION,
+          isHidden: false,
+        },
+      ];
+    });
+
+    // Hide all queries when adding an equation to a big number widget
+    if (displayType === DisplayType.BIG_NUMBER) {
+      setMetricQueries(curr => curr.map(q => ({...q, isHidden: true})));
+    }
+
+    setUserHasModified(true);
+  }, [displayType, generateEquationId]);
+
+  const removeEquation = useCallback(
     (index: number) => {
-      setMetricWidgetQueries(curr => {
+      setMetricEquations(curr => {
         const updated = [...curr];
         updated.splice(index, 1);
         return updated;
       });
+
+      // Show the last query when removing an equation from a big number widget
+      if (displayType === DisplayType.BIG_NUMBER) {
+        setMetricQueries(curr =>
+          curr.map((q, idx) => (idx === curr.length - 1 ? {...q, isHidden: false} : q))
+        );
+      }
+
+      setUserHasModified(true);
     },
-    [setMetricWidgetQueries]
+    [displayType]
+  );
+
+  const removeQuery = useCallback(
+    (index: number) => {
+      setMetricQueries(curr => {
+        const updated = [...curr];
+        updated.splice(index, 1);
+        // Make sure the last query is visible for big number widgets
+        if (displayType === DisplayType.BIG_NUMBER && filteredEquations.length === 0) {
+          updated[updated.length - 1]!.isHidden = false;
+        }
+        return updated;
+      });
+
+      setUserHasModified(true);
+    },
+    [displayType, filteredEquations.length]
   );
 
   const handleSubmit = useCallback(() => {
-    const convertedWidget = convertToDashboardWidget(
-      metricWidgetQueries.map(query => ({
+    const resolvedQueries = metricQueries.map(query => {
+      const {type} = parseMRI(query.mri);
+      if (type !== 'v' || !query.condition) {
+        return query;
+      }
+
+      const {mri, aggregation} = resolveVirtualMRI(
+        query.mri,
+        query.condition,
+        query.aggregation
+      );
+
+      return {
         ...query,
-        ...selection,
-      })),
-      toMetricDisplayType(metricWidgetQueries[0].displayType)
+        mri,
+        aggregation,
+      };
+    });
+
+    const convertedWidget = expressionsToWidget(
+      [...resolvedQueries, ...filteredEquations],
+      title.edited,
+      toDisplayType(displayType),
+      widget.interval
     );
-
-    const updatedWidget = {
-      ...widget,
-      title: titleToDisplay,
-      queries: convertedWidget.queries,
-      displayType: convertedWidget.displayType,
-    };
-
-    onMetricWidgetEdit?.(updatedWidget);
+    onMetricWidgetEdit?.({...widget, ...convertedWidget});
 
     closeModal();
   }, [
-    titleToDisplay,
-    metricWidgetQueries,
+    metricQueries,
+    filteredEquations,
+    title.edited,
+    displayType,
+    widget,
     onMetricWidgetEdit,
     closeModal,
-    widget,
-    selection,
+    resolveVirtualMRI,
   ]);
+
+  const handleDisplayTypeChange = useCallback((type: DisplayType) => {
+    setDisplayType(type);
+    setUserHasModified(true);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    if (
+      userHasModified &&
+      hasCustomMetrics(organization) &&
+      // eslint-disable-next-line no-alert
+      !window.confirm(t('You have unsaved changes, are you sure you want to close?'))
+    ) {
+      return;
+    }
+    closeModal();
+  }, [userHasModified, closeModal, organization]);
+
+  const {mri, aggregation, query, condition} = metricQueries[0]!;
+
+  if (isLoading) {
+    return <LoadingIndicator />;
+  }
 
   return (
     <Fragment>
       <OrganizationContext.Provider value={organization}>
-        <Header closeButton>
-          <WidgetHeader>
-            <WidgetTitle
-              value={editedTitle}
-              displayValue={titleToDisplay}
-              placeholder={widgetMQL}
-              onSubmit={handleTitleChange}
-            />
-            {widget.description && (
-              <Tooltip
-                title={widget.description}
-                containerDisplayMode="grid"
-                showOnlyOnOverflow
-                isHoverable
-                position="bottom"
-              >
-                <WidgetDescription>{widget.description}</WidgetDescription>
-              </Tooltip>
-            )}
-          </WidgetHeader>
+        <Header>
+          <MetricWidgetTitle
+            title={title}
+            onTitleChange={handleTitleChange}
+            placeholder={widgetMQL}
+            description={widget.description}
+          />
+          <CloseButton onClick={handleClose} />
         </Header>
         <Body>
+          <MetricsBetaEndAlert organization={organization} />
           <Queries
-            metricWidgetQueries={metricWidgetQueries}
-            handleChange={handleChange}
+            displayType={displayType}
+            metricQueries={metricQueries}
+            metricEquations={metricEquations}
+            onQueryChange={handleQueryChange}
+            onEquationChange={handleEquationChange}
+            addEquation={addEquation}
             addQuery={addQuery}
+            removeEquation={removeEquation}
             removeQuery={removeQuery}
           />
-          <MetricWidget
-            queries={metricWidgetQueries}
-            focusedSeries={metricWidgetQueries[0].focusedSeries}
-            displayType={metricWidgetQueries[0].displayType}
-            filters={selection}
-            onChange={(_, data) => {
-              handleChange(data, 0);
-            }}
-            context="dashboard"
+          <MetricVisualization
+            expressions={expressions}
+            displayType={displayType}
+            onDisplayTypeChange={handleDisplayTypeChange}
+            onOrderChange={handleOrderChange}
+            interval={widget.interval}
           />
-          <MetricDetails widget={metricWidgetQueries[0]} />
+          <MetricDetails
+            mri={mri}
+            aggregation={aggregation}
+            condition={condition}
+            query={query}
+          />
         </Body>
         <Footer>
           <ButtonBar gap={1}>
             <LinkButton
-              to={getDdmUrl(organization.slug, {
-                widgets: metricWidgetQueries,
+              to={getMetricsUrl(organization.slug, {
+                widgets: [...metricQueries, ...metricEquations],
                 ...selection.datetime,
                 project: selection.projects,
                 environment: selection.environments,
@@ -185,10 +365,11 @@ function MetricWidgetViewerModal({
             >
               {t('Open in Metrics')}
             </LinkButton>
-            <Button onClick={closeModal}>{t('Close')}</Button>
-            <Button priority="primary" onClick={handleSubmit}>
-              {t('Save changes')}
-            </Button>
+            {hasCustomMetrics(organization) && (
+              <Button priority="primary" onClick={handleSubmit}>
+                {t('Save changes')}
+              </Button>
+            )}
           </ButtonBar>
         </Footer>
       </OrganizationContext.Provider>
@@ -196,157 +377,7 @@ function MetricWidgetViewerModal({
   );
 }
 
-function WidgetTitle({value, displayValue, placeholder, onSubmit}) {
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [title, setTitle] = useState<string>(value);
-
-  return (
-    <WidgetTitleRow>
-      {isEditingTitle ? (
-        <Input
-          value={title}
-          placeholder={placeholder}
-          onChange={e => {
-            setTitle?.(e.target.value);
-          }}
-        />
-      ) : (
-        <h3>{displayValue}</h3>
-      )}
-      <Button
-        aria-label="Edit Title"
-        size="sm"
-        borderless
-        icon={isEditingTitle ? <IconCheckmark size="sm" /> : <IconEdit size="sm" />}
-        priority={isEditingTitle ? 'primary' : 'default'}
-        onClick={() => {
-          if (isEditingTitle) {
-            onSubmit?.(title);
-          }
-          setIsEditingTitle(curr => !curr);
-        }}
-      />
-    </WidgetTitleRow>
-  );
-}
-
-function Queries({metricWidgetQueries, handleChange, addQuery, removeQuery}) {
-  const {selection} = usePageFilters();
-
-  return (
-    <QueriesWrapper>
-      {metricWidgetQueries.map((query, index) => (
-        <Query
-          key={index}
-          widget={query}
-          projects={selection.projects}
-          onChange={data => handleChange(data, index)}
-          contextMenu={
-            <ContextMenu
-              removeQuery={removeQuery}
-              queryIndex={index}
-              canRemoveQuery={metricWidgetQueries.length > 1}
-              metricsQuery={query}
-            />
-          }
-        />
-      ))}
-      <Button size="sm" icon={<IconAdd isCircled />} onClick={addQuery}>
-        Add query
-      </Button>
-    </QueriesWrapper>
-  );
-}
-
-function ContextMenu({
-  metricsQuery,
-  removeQuery,
-  canRemoveQuery,
-  queryIndex,
-}: {
-  canRemoveQuery: boolean;
-  metricsQuery: MetricsQuery;
-  queryIndex: number;
-  removeQuery: (index: number) => void;
-}) {
-  const organization = useOrganization();
-  const router = useRouter();
-
-  const createAlert = useMemo(
-    () => getCreateAlert(organization, metricsQuery),
-    [metricsQuery, organization]
-  );
-
-  const items = useMemo<MenuItemProps[]>(() => {
-    const customMetric = !isCustomMetric({mri: metricsQuery.mri});
-    const addAlertItem = {
-      leadingItems: [<IconSiren key="icon" />],
-      key: 'add-alert',
-      label: t('Create Alert'),
-      disabled: !createAlert,
-      onAction: () => {
-        createAlert?.();
-      },
-    };
-    const removeQueryItem = {
-      leadingItems: [<IconClose key="icon" />],
-      key: 'delete',
-      label: t('Remove Query'),
-      disabled: !canRemoveQuery,
-      onAction: () => {
-        removeQuery(queryIndex);
-      },
-    };
-    const settingsItem = {
-      leadingItems: [<IconSettings key="icon" />],
-      key: 'settings',
-      label: t('Metric Settings'),
-      disabled: !customMetric,
-      onAction: () => {
-        navigateTo(
-          `/settings/projects/:projectId/metrics/${encodeURIComponent(metricsQuery.mri)}`,
-          router
-        );
-      },
-    };
-
-    return customMetric
-      ? [addAlertItem, removeQueryItem, settingsItem]
-      : [addAlertItem, removeQueryItem];
-  }, [createAlert, metricsQuery.mri, removeQuery, canRemoveQuery, queryIndex, router]);
-
-  return (
-    <DropdownMenu
-      items={items}
-      triggerProps={{
-        'aria-label': t('Widget actions'),
-        size: 'md',
-        showChevron: false,
-        icon: <IconEllipsis direction="down" size="sm" />,
-      }}
-      position="bottom-end"
-    />
-  );
-}
-
 export default MetricWidgetViewerModal;
-
-const WidgetHeader = styled('div')`
-  display: flex;
-  flex-direction: column;
-  gap: ${space(1)};
-`;
-
-const WidgetTitleRow = styled('div')`
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: ${space(1)};
-`;
-
-const QueriesWrapper = styled('div')`
-  padding-bottom: ${space(2)};
-`;
 
 export const modalCss = css`
   width: 100%;

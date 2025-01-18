@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 
 from django.db import router, transaction
-from rest_framework import status
 from rest_framework.request import Request
 
 from sentry import roles
-from sentry.api.exceptions import SentryAPIException
 from sentry.auth.access import Access
 from sentry.auth.superuser import is_active_superuser, superuser_has_permission
 from sentry.locks import locks
@@ -18,11 +17,7 @@ from sentry.models.team import Team
 from sentry.roles.manager import Role, TeamRole
 from sentry.utils.retries import TimedRetryPolicy
 
-
-class InvalidTeam(SentryAPIException):
-    status_code = status.HTTP_400_BAD_REQUEST
-    code = "invalid_team"
-    message = "The team slug does not match a team in the organization"
+logger = logging.getLogger("sentry.org_roles")
 
 
 def save_team_assignments(
@@ -76,8 +71,8 @@ def can_set_team_role(request: Request, team: Team, new_role: TeamRole) -> bool:
     if not can_admin_team(access, team):
         return False
 
-    org_roles = access.get_organization_roles()
-    if any(org_role.can_manage_team_role(new_role) for org_role in org_roles):
+    org_role = access.get_organization_role()
+    if org_role and org_role.can_manage_team_role(new_role):
         return True
 
     team_role = access.get_team_role(team)
@@ -99,6 +94,7 @@ def get_allowed_org_roles(
     request: Request,
     organization: Organization,
     member: OrganizationMember | None = None,
+    creating_org_invite: bool = False,
 ) -> Collection[Role]:
     """
     Get the set of org-level roles that the request is allowed to manage.
@@ -106,11 +102,15 @@ def get_allowed_org_roles(
     In order to change another member's role, the returned set must include both
     the starting role and the new role. That is, the set contains the roles that
     the request is allowed to promote someone to and to demote someone from.
+
+    If the request is to invite a new member, the member:admin scope is not required.
     """
 
     if is_active_superuser(request):
         return roles.get_all()
-    if not request.access.has_scope("member:admin"):
+
+    # The member:admin scope is not required to invite a new member (when creating_org_invite is True).
+    if not request.access.has_scope("member:admin") and not creating_org_invite:
         return ()
 
     if member is None:

@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from sentry.debug_files.artifact_bundles import maybe_renew_artifact_bundles_from_processing
+from sentry.lang.javascript.utils import JAVASCRIPT_PLATFORMS
 from sentry.lang.native.error import SymbolicationFailed, write_error
 from sentry.lang.native.symbolicator import Symbolicator
 from sentry.models.eventerror import EventError
@@ -55,6 +56,8 @@ def _merge_frame(new_frame, symbolicated):
         frame_meta = new_frame.setdefault("data", {})
         if data_sourcemap := data.get("sourcemap"):
             frame_meta["sourcemap"] = data_sourcemap
+        if data_sourcemap_origin := data.get("sourcemap_origin"):
+            frame_meta["sourcemap_origin"] = data_sourcemap_origin
         if data_resolved_with := data.get("resolved_with"):
             frame_meta["resolved_with"] = data_resolved_with
         if data.get("symbolicated") is not None:
@@ -169,6 +172,11 @@ def map_symbolicator_process_js_errors(errors):
 
 def _handles_frame(frame, data):
     abs_path = frame.get("abs_path")
+    platform = frame.get("platform") or data.get("platform", "unknown")
+
+    # Skip non-JS frames
+    if platform not in JAVASCRIPT_PLATFORMS:
+        return False
 
     # Skip frames without an `abs_path` or line number
     if not abs_path or not frame.get("lineno"):
@@ -179,7 +187,7 @@ def _handles_frame(frame, data):
         return False
 
     # Skip builtin node modules
-    if _is_built_in(abs_path, data.get("platform")):
+    if _is_built_in(abs_path, platform):
         return False
 
     return True
@@ -203,7 +211,7 @@ def _normalize_nonhandled_frame(frame, data):
     return frame
 
 
-FRAME_FIELDS = ("abs_path", "lineno", "colno", "function")
+FRAME_FIELDS = ("platform", "abs_path", "lineno", "colno", "function")
 
 
 def _normalize_frame(raw_frame: Any) -> dict:
@@ -238,6 +246,7 @@ def process_js_stacktraces(symbolicator: Symbolicator, data: Any) -> Any:
 
     metrics.incr("process.javascript.symbolicate.request")
     response = symbolicator.process_js(
+        platform=data.get("platform"),
         stacktraces=stacktraces,
         modules=modules,
         release=data.get("release"),

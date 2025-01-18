@@ -1,5 +1,4 @@
 import {Component} from 'react';
-import type {WithRouterProps} from 'react-router';
 import * as Sentry from '@sentry/react';
 import debounce from 'lodash/debounce';
 
@@ -7,18 +6,17 @@ import {fetchOrganizations} from 'sentry/actionCreators/organizations';
 import type {ResponseMeta} from 'sentry/api';
 import {Client} from 'sentry/api';
 import {t} from 'sentry/locale';
+import type {EventIdResponse} from 'sentry/types/event';
+import type {ShortIdResponse} from 'sentry/types/group';
 import type {
   DocIntegration,
-  EventIdResponse,
   IntegrationProvider,
-  Member,
-  Organization,
   PluginWithProjectList,
-  Project,
   SentryApp,
-  ShortIdResponse,
-  Team,
-} from 'sentry/types';
+} from 'sentry/types/integrations';
+import type {WithRouterProps} from 'sentry/types/legacyReactRouter';
+import type {Member, Organization, Team} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import {defined} from 'sentry/utils';
 import type {Fuse} from 'sentry/utils/fuzzySearch';
 import {createFuzzySearch} from 'sentry/utils/fuzzySearch';
@@ -388,7 +386,7 @@ class ApiSource extends Component<Props, State> {
     this.handleSearchRequest(searchRequests, directRequests);
   }, 150);
 
-  handleRequestError = (err: ResponseMeta, {url, orgId}) => {
+  handleRequestError = (err: ResponseMeta, {url, orgId}: any) => {
     if (err && err.status !== 401 && err.status !== 403) {
       Sentry.withScope(scope => {
         scope.setExtra(
@@ -427,16 +425,16 @@ class ApiSource extends Component<Props, State> {
 
     const [searchResults, directResults] = await Promise.all([
       this.getSearchableResults([
-        organizations,
-        projects,
-        teams,
-        members,
-        plugins,
-        integrations,
-        sentryApps,
-        docIntegrations,
+        organizations!,
+        projects!,
+        teams!,
+        members!,
+        plugins!,
+        integrations!,
+        sentryApps!,
+        docIntegrations!,
       ]),
-      this.getDirectResults([shortIdLookup, eventIdLookup]),
+      this.getDirectResults([shortIdLookup!, eventIdLookup!]),
     ]);
 
     // TODO(XXX): Might consider adding logic to maintain consistent ordering
@@ -470,14 +468,14 @@ class ApiSource extends Component<Props, State> {
       docIntegrations,
     ] = requests;
     const searchResults = await Promise.all([
-      createOrganizationResults(organizations),
-      createProjectResults(projects, orgId),
-      createTeamResults(teams, orgId),
-      createMemberResults(members, orgId),
-      createIntegrationResults(integrations, orgId),
-      createPluginResults(plugins, orgId),
-      createSentryAppResults(sentryApps, orgId),
-      createDocIntegrationResults(docIntegrations, orgId),
+      createOrganizationResults(organizations!),
+      createProjectResults(projects!, orgId),
+      createTeamResults(teams!, orgId),
+      createMemberResults(members!, orgId),
+      createIntegrationResults(integrations!, orgId),
+      createPluginResults(plugins!, orgId),
+      createSentryAppResults(sentryApps!, orgId),
+      createDocIntegrationResults(docIntegrations!, orgId),
     ]);
 
     return searchResults.flat();
@@ -490,8 +488,8 @@ class ApiSource extends Component<Props, State> {
 
     const directResults = (
       await Promise.all([
-        createShortIdLookupResult(shortIdLookup),
-        createEventIdLookupResult(eventIdLookup),
+        createShortIdLookupResult(shortIdLookup!),
+        createEventIdLookupResult(eventIdLookup!),
       ])
     ).filter(defined);
 

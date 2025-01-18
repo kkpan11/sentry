@@ -11,11 +11,11 @@ import {render, screen, userEvent} from 'sentry-test/reactTestingLibrary';
 
 import StackTraceContent from 'sentry/components/events/interfaces/crashContent/stackTrace/content';
 import ProjectsStore from 'sentry/stores/projectsStore';
-import {EventOrGroupType} from 'sentry/types';
+import {EventOrGroupType} from 'sentry/types/event';
 import type {StacktraceType} from 'sentry/types/stacktrace';
 
 const organization = OrganizationFixture();
-const project = ProjectFixture({});
+const project = ProjectFixture();
 
 const integration = GitHubIntegrationFixture();
 const repo = RepositoryFixture({integrationId: integration.id});
@@ -72,9 +72,6 @@ describe('StackTrace', function () {
     const stackTraceContent = screen.getByTestId('stack-trace-content');
     expect(stackTraceContent).toBeInTheDocument();
 
-    // stack trace content has to have a platform icon and a frame list
-    expect(stackTraceContent.children).toHaveLength(2);
-
     // platform icon
     expect(screen.getByTestId('platform-icon-python')).toBeInTheDocument();
 
@@ -119,15 +116,15 @@ describe('StackTrace', function () {
     const frameTitles = screen.getAllByTestId('title');
 
     // collapse the expanded frame (by default)
-    await userEvent.click(frameTitles[0]);
+    await userEvent.click(frameTitles[0]!);
 
     // all frames are now collapsed
     expect(screen.queryByTestId('toggle-button-expanded')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('toggle-button-collapsed')).toHaveLength(5);
 
     // expand penultimate and last frame
-    await userEvent.click(frameTitles[frameTitles.length - 2]);
-    await userEvent.click(frameTitles[frameTitles.length - 1]);
+    await userEvent.click(frameTitles[frameTitles.length - 2]!);
+    await userEvent.click(frameTitles[frameTitles.length - 1]!);
 
     // two frames are now collapsed
     expect(screen.getAllByTestId('toggle-button-expanded')).toHaveLength(2);
@@ -157,8 +154,8 @@ describe('StackTrace', function () {
     const collapsedToggleButtons = screen.getAllByTestId('toggle-button-collapsed');
 
     // expand penultimate and last frame
-    await userEvent.click(collapsedToggleButtons[collapsedToggleButtons.length - 2]);
-    await userEvent.click(collapsedToggleButtons[collapsedToggleButtons.length - 1]);
+    await userEvent.click(collapsedToggleButtons[collapsedToggleButtons.length - 2]!);
+    await userEvent.click(collapsedToggleButtons[collapsedToggleButtons.length - 1]!);
 
     // two frames are now collapsed
     expect(screen.getAllByTestId('toggle-button-expanded')).toHaveLength(2);
@@ -191,7 +188,7 @@ describe('StackTrace', function () {
 
   it('does not render non in app tags', function () {
     const dataFrames = [...data.frames];
-    dataFrames[0] = {...dataFrames[0], inApp: false};
+    dataFrames[0] = {...dataFrames[0]!, inApp: false};
 
     const newData = {
       ...data,
@@ -207,7 +204,7 @@ describe('StackTrace', function () {
 
   it('displays a toggle button when there is more than one non-inapp frame', function () {
     const dataFrames = [...data.frames];
-    dataFrames[0] = {...dataFrames[0], inApp: true};
+    dataFrames[0] = {...dataFrames[0]!, inApp: true};
 
     const newData = {
       ...data,
@@ -224,11 +221,11 @@ describe('StackTrace', function () {
 
   it('shows/hides frames when toggle button clicked', async function () {
     const dataFrames = [...data.frames];
-    dataFrames[0] = {...dataFrames[0], inApp: true};
-    dataFrames[1] = {...dataFrames[1], function: 'non-in-app-frame'};
-    dataFrames[2] = {...dataFrames[2], function: 'non-in-app-frame'};
-    dataFrames[3] = {...dataFrames[3], function: 'non-in-app-frame'};
-    dataFrames[4] = {...dataFrames[4], function: 'non-in-app-frame'};
+    dataFrames[0] = {...dataFrames[0]!, inApp: true};
+    dataFrames[1] = {...dataFrames[1]!, function: 'non-in-app-frame'};
+    dataFrames[2] = {...dataFrames[2]!, function: 'non-in-app-frame'};
+    dataFrames[3] = {...dataFrames[3]!, function: 'non-in-app-frame'};
+    dataFrames[4] = {...dataFrames[4]!, function: 'non-in-app-frame'};
 
     const newData = {
       ...data,
@@ -247,9 +244,9 @@ describe('StackTrace', function () {
 
   it('does not display a toggle button when there is only one non-inapp frame', function () {
     const dataFrames = [...data.frames];
-    dataFrames[0] = {...dataFrames[0], inApp: true};
-    dataFrames[2] = {...dataFrames[2], inApp: true};
-    dataFrames[4] = {...dataFrames[4], inApp: true};
+    dataFrames[0] = {...dataFrames[0]!, inApp: true};
+    dataFrames[2] = {...dataFrames[2]!, inApp: true};
+    dataFrames[4] = {...dataFrames[4]!, inApp: true};
 
     const newData = {
       ...data,
@@ -272,7 +269,7 @@ describe('StackTrace', function () {
         ...data,
         hasSystemFrames: true,
         frames: [
-          {...dataFrames[0], inApp: true},
+          {...dataFrames[0]!, inApp: true},
           ...dataFrames.splice(1, dataFrames.length),
         ],
       };
@@ -307,7 +304,7 @@ describe('StackTrace', function () {
         registers: {},
         frames: [
           ...dataFrames.splice(0, dataFrames.length - 1),
-          {...dataFrames[dataFrames.length - 1], inApp: true},
+          {...dataFrames[dataFrames.length - 1]!, inApp: true},
         ],
       };
 
@@ -342,7 +339,7 @@ describe('StackTrace', function () {
         hasSystemFrames: true,
         frames: [
           ...dataFrames.slice(0, 1),
-          {...dataFrames[1], inApp: true},
+          {...dataFrames[1]!, inApp: true},
           ...dataFrames.slice(2, dataFrames.length),
         ],
       };
@@ -378,7 +375,7 @@ describe('StackTrace', function () {
         ...data,
         hasSystemFrames: true,
         frames: [
-          {...dataFrames[0], inApp: true},
+          {...dataFrames[0]!, inApp: true},
           ...dataFrames.splice(1, dataFrames.length),
         ],
       };
@@ -412,7 +409,7 @@ describe('StackTrace', function () {
         ...data,
         hasSystemFrames: true,
         frames: [
-          {...dataFrames[0], inApp: true},
+          {...dataFrames[0]!, inApp: true},
           ...dataFrames.splice(1, dataFrames.length),
         ],
       };

@@ -1,6 +1,13 @@
 import {Fragment, useContext, useEffect, useRef} from 'react';
 import styled from '@emotion/styled';
 
+import {CheckInPlaceholder} from 'sentry/components/checkInTimeline/checkInPlaceholder';
+import {MockCheckInTimeline} from 'sentry/components/checkInTimeline/checkInTimeline';
+import {
+  GridLineLabels,
+  GridLineOverlay,
+} from 'sentry/components/checkInTimeline/gridLines';
+import {getConfigFromTimeRange} from 'sentry/components/checkInTimeline/utils/getConfigFromTimeRange';
 import FormContext from 'sentry/components/forms/formContext';
 import type {FieldValue} from 'sentry/components/forms/model';
 import Panel from 'sentry/components/panels/panel';
@@ -9,20 +16,16 @@ import {t} from 'sentry/locale';
 import {useApiQuery} from 'sentry/utils/queryClient';
 import {useDimensions} from 'sentry/utils/useDimensions';
 import useOrganization from 'sentry/utils/useOrganization';
-import {MockCheckInTimeline} from 'sentry/views/monitors/components/overviewTimeline/checkInTimeline';
-import {
-  GridLineOverlay,
-  GridLineTimeLabels,
-} from 'sentry/views/monitors/components/overviewTimeline/gridLines';
-import {TimelinePlaceholder} from 'sentry/views/monitors/components/overviewTimeline/timelinePlaceholder';
-import {getConfigFromTimeRange} from 'sentry/views/monitors/components/overviewTimeline/utils';
-import {ScheduleType} from 'sentry/views/monitors/types';
+import {CheckInStatus, ScheduleType} from 'sentry/views/monitors/types';
+
+import {checkInStatusPrecedent, statusToText, tickStyle} from '../utils';
 
 interface ScheduleConfig {
   cronSchedule?: FieldValue;
   intervalFrequency?: FieldValue;
   intervalUnit?: FieldValue;
   scheduleType?: FieldValue;
+  timezone?: FieldValue;
 }
 
 const NUM_SAMPLE_TICKS = 9;
@@ -40,13 +43,16 @@ interface Props {
 }
 
 export function MockTimelineVisualization({schedule}: Props) {
-  const {scheduleType, cronSchedule, intervalFrequency, intervalUnit} = schedule;
+  const {scheduleType, cronSchedule, timezone, intervalFrequency, intervalUnit} =
+    schedule;
+
   const organization = useOrganization();
   const {form} = useContext(FormContext);
 
   const query = {
     num_ticks: NUM_SAMPLE_TICKS,
     schedule_type: scheduleType,
+    timezone,
     schedule:
       scheduleType === 'interval' ? [intervalFrequency, intervalUnit] : cronSchedule,
   };
@@ -58,7 +64,7 @@ export function MockTimelineVisualization({schedule}: Props) {
     `/organizations/${organization.slug}/monitors-schedule-data/`,
     {query},
   ] as const;
-  const {data, isLoading, isError, error} = useApiQuery<number[]>(sampleDataQueryKey, {
+  const {data, isPending, isError, error} = useApiQuery<number[]>(sampleDataQueryKey, {
     staleTime: 0,
     enabled: isValidConfig(schedule),
     retry: false,
@@ -66,7 +72,8 @@ export function MockTimelineVisualization({schedule}: Props) {
 
   const errorMessage =
     isError || !isValidConfig(schedule)
-      ? error?.responseJSON?.schedule?.[0] ?? t('Invalid Schedule')
+      ? // @ts-ignore TS(2571): Object is of type 'unknown'.
+        error?.responseJSON?.schedule?.[0] ?? t('Invalid Schedule')
       : null;
 
   useEffect(() => {
@@ -90,35 +97,24 @@ export function MockTimelineVisualization({schedule}: Props) {
   return (
     <TimelineContainer>
       <TimelineWidthTracker ref={elementRef} />
-      {isLoading || !start || !end || !timeWindowConfig || !mockTimestamps ? (
+      {isPending || !start || !end || !timeWindowConfig || !mockTimestamps ? (
         <Fragment>
-          <Placeholder height="40px" />
-          {errorMessage ? (
-            <Placeholder testId="error-placeholder" height="100px" />
-          ) : (
-            <TimelinePlaceholder />
-          )}
+          <Placeholder height="50px" />
+          {errorMessage ? null : <CheckInPlaceholder />}
         </Fragment>
       ) : (
         <Fragment>
-          <StyledGridLineTimeLabels
+          <AlignedGridLineLabels timeWindowConfig={timeWindowConfig} />
+          <AlignedGridLineOverlay
+            showCursor={!isPending}
             timeWindowConfig={timeWindowConfig}
-            start={start}
-            end={end}
-            width={timelineWidth}
-          />
-          <StyledGridLineOverlay
-            showCursor={!isLoading}
-            timeWindowConfig={timeWindowConfig}
-            start={start}
-            end={end}
-            width={timelineWidth}
           />
           <MockCheckInTimeline
-            width={timelineWidth}
             mockTimestamps={mockTimestamps.slice(1, mockTimestamps.length - 1)}
-            start={start}
-            end={end}
+            status={CheckInStatus.IN_PROGRESS}
+            statusStyle={tickStyle}
+            statusLabel={statusToText}
+            statusPrecedent={checkInStatusPrecedent}
             timeWindowConfig={timeWindowConfig}
           />
         </Fragment>
@@ -130,15 +126,16 @@ export function MockTimelineVisualization({schedule}: Props) {
 const TimelineContainer = styled(Panel)`
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: 40px 100px;
+  grid-template-rows: auto 60px;
   align-items: center;
 `;
 
-const StyledGridLineTimeLabels = styled(GridLineTimeLabels)`
+const AlignedGridLineLabels = styled(GridLineLabels)`
   grid-column: 0;
+  border-bottom: 1px solid ${p => p.theme.border};
 `;
 
-const StyledGridLineOverlay = styled(GridLineOverlay)`
+const AlignedGridLineOverlay = styled(GridLineOverlay)`
   grid-column: 0;
 `;
 

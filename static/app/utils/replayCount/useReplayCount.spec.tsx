@@ -2,7 +2,7 @@ import type {ReactNode} from 'react';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 
 import {makeTestQueryClient} from 'sentry-test/queryClient';
-import {reactHooks} from 'sentry-test/reactTestingLibrary';
+import {renderHook, waitFor} from 'sentry-test/reactTestingLibrary';
 
 import {QueryClientProvider} from 'sentry/utils/queryClient';
 import useReplayCount from 'sentry/utils/replayCount/useReplayCount';
@@ -36,14 +36,14 @@ describe('useReplayCount', () => {
         '3333': 0,
       });
 
-      const {result, waitFor} = reactHooks.renderHook(useReplayCount, {
+      const {result} = renderHook(useReplayCount, {
         wrapper,
         initialProps,
       });
 
-      expect(result.current.getOne('1111')).toBe(undefined);
-      expect(result.current.getOne('2222')).toBe(undefined);
-      expect(result.current.getOne('3333')).toBe(undefined);
+      expect(result.current.getOne('1111')).toBeUndefined();
+      expect(result.current.getOne('2222')).toBeUndefined();
+      expect(result.current.getOne('3333')).toBeUndefined();
       expect(result.current.hasOne('1111')).toBeFalsy();
       expect(result.current.hasOne('2222')).toBeFalsy();
       expect(result.current.hasOne('3333')).toBeFalsy();
@@ -72,13 +72,13 @@ describe('useReplayCount', () => {
         '2222': 7,
       });
 
-      const {result, waitFor} = reactHooks.renderHook(useReplayCount, {
+      const {result} = renderHook(useReplayCount, {
         wrapper,
         initialProps,
       });
 
-      expect(result.current.getOne('1111')).toBe(undefined);
-      expect(result.current.getOne('2222')).toBe(undefined);
+      expect(result.current.getOne('1111')).toBeUndefined();
+      expect(result.current.getOne('2222')).toBeUndefined();
       expect(result.current.hasOne('1111')).toBeFalsy();
       expect(result.current.hasOne('2222')).toBeFalsy();
 
@@ -108,7 +108,7 @@ describe('useReplayCount', () => {
         '3333': 0,
       });
 
-      const {result, waitFor} = reactHooks.renderHook(useReplayCount, {
+      const {result} = renderHook(useReplayCount, {
         wrapper,
         initialProps,
       });
@@ -144,7 +144,7 @@ describe('useReplayCount', () => {
         '2222': 7,
       });
 
-      const {result, waitFor} = reactHooks.renderHook(useReplayCount, {
+      const {result} = renderHook(useReplayCount, {
         wrapper,
         initialProps,
       });

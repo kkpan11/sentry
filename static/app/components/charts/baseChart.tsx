@@ -112,6 +112,10 @@ interface TooltipOption
     seriesParams?: TooltipComponentFormatterCallback<any>
   ) => string;
   /**
+   * If true does not display sublabels with a value of 0.
+   */
+  skipZeroValuedSubLabels?: boolean;
+  /**
    * Array containing data that is used to display indented sublabels.
    */
   subLabels?: TooltipSubLabel[];
@@ -148,7 +152,7 @@ export interface BaseChartProps {
    * Array of color codes to use in charts. May also take a function which is
    * provided with the current theme
    */
-  colors?: string[] | ((theme: Theme) => string[]);
+  colors?: string[] | readonly string[] | ((theme: Theme) => string[]);
   'data-test-id'?: string;
   /**
    * DataZoom (allows for zooming of chart)
@@ -274,6 +278,10 @@ export interface BaseChartProps {
    */
   transformSinglePointToLine?: boolean;
   /**
+   * Use multiline date formatting for xAxis if grouped by date
+   */
+  useMultilineDate?: boolean;
+  /**
    * Use short date formatting for xAxis
    */
   useShortDate?: boolean;
@@ -315,8 +323,8 @@ export interface BaseChartProps {
 
 const DEFAULT_CHART_READY = () => {};
 const DEFAULT_OPTIONS = {};
-const DEFAULT_SERIES = [];
-const DEFAULT_ADDITIONAL_SERIES = [];
+const DEFAULT_SERIES: SeriesOption[] = [];
+const DEFAULT_ADDITIONAL_SERIES: LineSeriesOption[] = [];
 const DEFAULT_Y_AXIS = {};
 const DEFAULT_X_AXIS = {};
 
@@ -337,6 +345,7 @@ function BaseChartUnwrapped({
   minutesThresholdToDisplaySeconds,
   showTimeInTooltip,
   useShortDate,
+  useMultilineDate,
   start,
   end,
   period,
@@ -381,7 +390,7 @@ function BaseChartUnwrapped({
   const theme = useTheme();
 
   const resolveColors =
-    colors !== undefined ? (Array.isArray(colors) ? colors : colors(theme)) : null;
+    colors !== undefined ? (typeof colors === 'function' ? colors(theme) : colors) : null;
 
   const color =
     resolveColors ||
@@ -389,7 +398,7 @@ function BaseChartUnwrapped({
 
   const resolvedSeries = useMemo(() => {
     const previousPeriodColors =
-      (previousPeriod?.length ?? 0) > 1 ? lightenHexToRgb(color) : undefined;
+      (previousPeriod?.length ?? 0) > 1 ? lightenHexToRgb(color as string[]) : undefined;
 
     const hasSinglePoints = (series as LineSeriesOption[] | undefined)?.every(
       s => Array.isArray(s.data) && s.data.length <= 1
@@ -410,14 +419,14 @@ function BaseChartUnwrapped({
               type: 'line',
               itemStyle: {...(s.lineStyle ?? {})},
               markLine:
-                s?.data?.[0]?.[1] !== undefined
+                (s?.data?.[0] as any)?.[1] !== undefined
                   ? MarkLine({
                       silent: true,
                       lineStyle: {
                         type: 'solid',
                         width: 1.5,
                       },
-                      data: [{yAxis: s?.data?.[0]?.[1]}],
+                      data: [{yAxis: (s?.data?.[0] as any)?.[1]}],
                       label: {
                         show: false,
                       },
@@ -515,6 +524,7 @@ function BaseChartUnwrapped({
             ...xAxis,
             theme,
             useShortDate,
+            useMultilineDate,
             start,
             end,
             period,
@@ -529,6 +539,7 @@ function BaseChartUnwrapped({
               ...axis,
               theme,
               useShortDate,
+              useMultilineDate,
               start,
               end,
               period,
@@ -576,6 +587,7 @@ function BaseChartUnwrapped({
     graphic,
     isGroupedByDate,
     useShortDate,
+    useMultilineDate,
     start,
     end,
     period,
@@ -594,22 +606,23 @@ function BaseChartUnwrapped({
   const eventsMap = useMemo(
     () =>
       ({
-        click: (props, instance) => {
+        click: (props: any, instance: ECharts) => {
           handleClick(props, instance);
           onClick?.(props, instance);
         },
-        highlight: (props, instance) => onHighlight?.(props, instance),
-        mouseout: (props, instance) => onMouseOut?.(props, instance),
-        mouseover: (props, instance) => onMouseOver?.(props, instance),
-        datazoom: (props, instance) => onDataZoom?.(props, instance),
-        restore: (props, instance) => onRestore?.(props, instance),
-        finished: (props, instance) => onFinished?.(props, instance),
-        rendered: (props, instance) => onRendered?.(props, instance),
-        legendselectchanged: (props, instance) =>
+        highlight: (props: any, instance: ECharts) => onHighlight?.(props, instance),
+        mouseout: (props: any, instance: ECharts) => onMouseOut?.(props, instance),
+        mouseover: (props: any, instance: ECharts) => onMouseOver?.(props, instance),
+        datazoom: (props: any, instance: ECharts) => onDataZoom?.(props, instance),
+        restore: (props: any, instance: ECharts) => onRestore?.(props, instance),
+        finished: (props: any, instance: ECharts) => onFinished?.(props, instance),
+        rendered: (props: any, instance: ECharts) => onRendered?.(props, instance),
+        legendselectchanged: (props: any, instance: ECharts) =>
           onLegendSelectChanged?.(props, instance),
-        brush: (props, instance) => onBrushStart?.(props, instance),
-        brushend: (props, instance) => onBrushEnd?.(props, instance),
-        brushselected: (props, instance) => onBrushSelected?.(props, instance),
+        brush: (props: any, instance: ECharts) => onBrushStart?.(props, instance),
+        brushend: (props: any, instance: ECharts) => onBrushEnd?.(props, instance),
+        brushselected: (props: any, instance: ECharts) =>
+          onBrushSelected?.(props, instance),
       }) as ReactEchartProps['onEvents'],
     [
       onClick,
@@ -686,7 +699,7 @@ const getTooltipStyles = (p: {theme: Theme}) => css`
     ${p.theme.overflowEllipsis};
   }
   .tooltip-label strong {
-    font-weight: normal;
+    font-weight: ${p.theme.fontWeightNormal};
     color: ${p.theme.textColor};
   }
   .tooltip-label-value {
@@ -699,6 +712,16 @@ const getTooltipStyles = (p: {theme: Theme}) => css`
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+  }
+  .tooltip-label-align-start {
+    display: flex;
+    justify-content: flex-start;
+    align-items: baseline;
+  }
+  .tooltip-code-no-margin {
+    padding-left: 0;
+    margin-left: 0;
+    color: ${p.theme.subText};
   }
   .tooltip-footer {
     border-top: solid 1px ${p.theme.innerBorder};
@@ -746,7 +769,7 @@ const getTooltipStyles = (p: {theme: Theme}) => css`
     opacity: 0.9;
     padding: 5px 10px;
     position: relative;
-    font-weight: bold;
+    font-weight: ${p.theme.fontWeightBold};
     font-size: ${p.theme.fontSizeSmall};
     line-height: 1.4;
     font-family: ${p.theme.text.family};

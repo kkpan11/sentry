@@ -8,7 +8,8 @@ import type {
 import {Tooltip} from 'sentry/components/tooltip';
 import {IconLink} from 'sentry/icons';
 import {t} from 'sentry/locale';
-import type {Event, Group} from 'sentry/types';
+import type {Event} from 'sentry/types/event';
+import type {Group} from 'sentry/types/group';
 import {
   getIntegrationDisplayName,
   getIntegrationIcon,
@@ -68,12 +69,13 @@ export default function IssueTrackingSignals({group}: Props) {
     );
   }
 
-  const issue = linkedIssues[0];
+  const issue = linkedIssues[0]!;
   const {name, icon} = {
     'plugin-issue': getPluginNames,
     'plugin-actions': getPluginNames,
     'integration-issue': getIntegrationNames,
     'sentry-app-issue': getAppIntegrationNames,
+    // @ts-ignore TS(2551): Property 'plugin-action' does not exist on type '{... Remove this comment to see the full error message
   }[issue.type](issue) ?? {name: '', icon: undefined};
 
   return (

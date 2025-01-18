@@ -4,7 +4,7 @@ import re
 from abc import ABC
 from collections.abc import Collection, Generator, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Literal, TypedDict, overload
+from typing import Literal, NotRequired, TypedDict, overload
 
 from sentry.sentry_metrics.use_case_id_registry import UseCaseID
 from sentry.snuba.dataset import EntityKey
@@ -90,6 +90,7 @@ MetricOperationType = Literal[
     "on_demand_eps",
     "on_demand_failure_count",
     "on_demand_failure_rate",
+    "on_demand_count_unique",
     "on_demand_count_web_vitals",
     "on_demand_user_misery",
 ]
@@ -116,6 +117,7 @@ MetricUnit = Literal[
     "terabyte",
     "petabyte",
     "exabyte",
+    "none",
 ]
 #: The type of metric, which determines the snuba entity to query
 MetricType = Literal[
@@ -139,7 +141,7 @@ MetricEntity = Literal[
     "generic_metrics_gauges",
 ]
 
-OP_TO_SNUBA_FUNCTION = {
+OP_TO_SNUBA_FUNCTION: dict[MetricEntity, dict[MetricOperationType, str]] = {
     "metrics_counters": {
         "sum": "sumIf",
         "min_timestamp": "minIf",
@@ -167,7 +169,7 @@ OP_TO_SNUBA_FUNCTION = {
         "max_timestamp": "maxIf",
     },
 }
-GENERIC_OP_TO_SNUBA_FUNCTION = {
+GENERIC_OP_TO_SNUBA_FUNCTION: dict[MetricEntity, dict[MetricOperationType, str]] = {
     "generic_metrics_counters": OP_TO_SNUBA_FUNCTION["metrics_counters"],
     "generic_metrics_distributions": OP_TO_SNUBA_FUNCTION["metrics_distributions"],
     "generic_metrics_sets": OP_TO_SNUBA_FUNCTION["metrics_sets"],
@@ -192,8 +194,14 @@ USE_CASE_ID_TO_ENTITY_KEYS = {
         EntityKey.GenericMetricsCounters,
         EntityKey.GenericMetricsSets,
         EntityKey.GenericMetricsDistributions,
+        EntityKey.GenericMetricsGauges,
     },
     UseCaseID.TRANSACTIONS: {
+        EntityKey.GenericMetricsCounters,
+        EntityKey.GenericMetricsSets,
+        EntityKey.GenericMetricsDistributions,
+    },
+    UseCaseID.PROFILES: {
         EntityKey.GenericMetricsCounters,
         EntityKey.GenericMetricsSets,
         EntityKey.GenericMetricsDistributions,
@@ -202,6 +210,10 @@ USE_CASE_ID_TO_ENTITY_KEYS = {
         EntityKey.GenericMetricsCounters,
         EntityKey.GenericMetricsSets,
         EntityKey.GenericMetricsDistributions,
+        EntityKey.GenericMetricsGauges,
+    },
+    UseCaseID.METRIC_STATS: {
+        EntityKey.GenericMetricsCounters,
         EntityKey.GenericMetricsGauges,
     },
 }
@@ -262,9 +274,6 @@ AVAILABLE_GENERIC_OPERATIONS = {
 }
 OPERATIONS_TO_ENTITY = {
     op: entity for entity, operations in AVAILABLE_OPERATIONS.items() for op in operations
-}
-GENERIC_OPERATIONS_TO_ENTITY = {
-    op: entity for entity, operations in AVAILABLE_GENERIC_OPERATIONS.items() for op in operations
 }
 
 METRIC_TYPE_TO_ENTITY: Mapping[MetricType, EntityKey] = {
@@ -330,6 +339,7 @@ class MetricMeta(TypedDict):
     type: MetricType
     operations: Collection[MetricOperationType]
     unit: MetricUnit | None
+    metric_id: NotRequired[int]
     mri: str
     projectIds: Sequence[int]
     blockingStatus: Sequence[BlockedMetric] | None
@@ -364,6 +374,7 @@ DERIVED_OPERATIONS = (
     "on_demand_eps",
     "on_demand_failure_count",
     "on_demand_failure_rate",
+    "on_demand_count_unique",
     "on_demand_count_web_vitals",
     "on_demand_user_misery",
 )
@@ -418,49 +429,45 @@ def combine_dictionary_of_list_values(main_dict, other_dict):
 
 
 class MetricDoesNotExistException(Exception):
-    ...
+    pass
 
 
 class MetricDoesNotExistInIndexer(Exception):
-    ...
+    pass
 
 
 class DerivedMetricException(Exception, ABC):
-    ...
+    pass
 
 
 class DerivedMetricParseException(DerivedMetricException):
-    ...
+    pass
 
 
 class NotSupportedOverCompositeEntityException(DerivedMetricException):
-    ...
+    pass
 
 
 class OrderByNotSupportedOverCompositeEntityException(NotSupportedOverCompositeEntityException):
-    ...
+    pass
 
 
 @overload
-def to_intervals(start: None, end: datetime, interval_seconds: int) -> tuple[None, None, int]:
-    ...
+def to_intervals(start: None, end: datetime, interval_seconds: int) -> tuple[None, None, int]: ...
 
 
 @overload
-def to_intervals(start: datetime, end: None, interval_seconds: int) -> tuple[None, None, int]:
-    ...
+def to_intervals(start: datetime, end: None, interval_seconds: int) -> tuple[None, None, int]: ...
 
 
 @overload
-def to_intervals(start: None, end: None, interval_seconds: int) -> tuple[None, None, int]:
-    ...
+def to_intervals(start: None, end: None, interval_seconds: int) -> tuple[None, None, int]: ...
 
 
 @overload
 def to_intervals(
     start: datetime, end: datetime, interval_seconds: int
-) -> tuple[datetime, datetime, int]:
-    ...
+) -> tuple[datetime, datetime, int]: ...
 
 
 def to_intervals(
@@ -474,7 +481,7 @@ def to_intervals(
     assert interval_seconds > 0
 
     # horrible hack for backward compatibility
-    # TODO Try to fix this upstream
+    # TODO: Try to fix this upstream
     if start is None or end is None:
         return None, None, 0
 
@@ -528,7 +535,7 @@ def get_num_intervals(
 
 def get_intervals(
     start: datetime, end: datetime, granularity: int, interval: int | None = None
-) -> Generator[datetime, None, None]:
+) -> Generator[datetime]:
     if interval is None:
         interval = granularity
 

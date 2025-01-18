@@ -6,23 +6,26 @@ import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent
 import RadioGroup from 'sentry/components/forms/controls/radioGroup';
 import SelectControl from 'sentry/components/forms/controls/selectControl';
 import Input from 'sentry/components/input';
-import {SupportedLanguages} from 'sentry/components/onboarding/frameworkSuggestionModal';
+import type {SupportedLanguages} from 'sentry/components/onboarding/frameworkSuggestionModal';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
 import type {IssueAlertRuleAction} from 'sentry/types/alerts';
 import {IssueAlertActionType, IssueAlertConditionType} from 'sentry/types/alerts';
+import type {Organization} from 'sentry/types/organization';
 import withOrganization from 'sentry/utils/withOrganization';
+import IssueAlertNotificationOptions, {
+  type IssueAlertNotificationProps,
+} from 'sentry/views/projectInstall/issueAlertNotificationOptions';
 
 export enum MetricValues {
-  ERRORS,
-  USERS,
+  ERRORS = 0,
+  USERS = 1,
 }
 
 export enum RuleAction {
-  DEFAULT_ALERT,
-  CUSTOMIZED_ALERTS,
-  CREATE_ALERT_LATER,
+  DEFAULT_ALERT = 0,
+  CUSTOMIZED_ALERTS = 1,
+  CREATE_ALERT_LATER = 2,
 }
 
 const ISSUE_ALERT_DEFAULT_ACTION: Omit<
@@ -46,6 +49,7 @@ type Props = DeprecatedAsyncComponent['props'] & {
   alertSetting?: string;
   interval?: string;
   metric?: MetricValues;
+  notificationProps?: IssueAlertNotificationProps;
   platformLanguage?: SupportedLanguages;
   threshold?: string;
 };
@@ -69,6 +73,7 @@ type RequestDataFragment = {
   frequency: number;
   name: string;
   shouldCreateCustomRule: boolean;
+  shouldCreateRule: boolean;
 };
 
 function getConditionFrom(
@@ -95,7 +100,7 @@ function getConditionFrom(
 }
 
 function unpackConditions(conditions: any[]) {
-  const equalityReducer = (acc, curr) => {
+  const equalityReducer = (acc: any, curr: any) => {
     if (!acc || !curr || !isEqual(acc, curr)) {
       return null;
     }
@@ -127,7 +132,7 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
       {value: MetricValues.USERS, label: t('users affected by')},
     ].filter(({value}) => {
       return this.state.conditions?.some?.(
-        object => object?.id === METRIC_CONDITION_MAP[value]
+        (object: any) => object?.id === METRIC_CONDITION_MAP[value]
       );
     });
   }
@@ -163,7 +168,9 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
         <InlineSelectControl
           value={this.state.metric}
           options={this.getAvailableMetricOptions()}
-          onChange={metric => this.setStateAndUpdateParents({metric: metric.value})}
+          onChange={(metric: any) =>
+            this.setStateAndUpdateParents({metric: metric.value})
+          }
         />
         {t('a unique error in')}
         <InlineSelectControl
@@ -172,14 +179,14 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
             value,
             label,
           }))}
-          onChange={interval => this.setStateAndUpdateParents({interval: interval.value})}
+          onChange={(interval: any) =>
+            this.setStateAndUpdateParents({interval: interval.value})
+          }
         />
       </CustomizeAlert>,
     ];
 
-    const default_label = this.shouldUseNewDefaultSetting()
-      ? t('Alert me on high priority issues')
-      : t('Alert me on every new issue');
+    const default_label = t('Alert me on high priority issues');
 
     const options: [string, React.ReactNode][] = [
       [RuleAction.DEFAULT_ALERT.toString(), default_label],
@@ -192,30 +199,26 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
     ]);
   }
 
-  shouldUseNewDefaultSetting(): boolean {
-    return (
-      this.props.organization.features.includes('default-high-priority-alerts') &&
-      (this.props.platformLanguage === SupportedLanguages.PYTHON ||
-        this.props.platformLanguage === SupportedLanguages.JAVASCRIPT)
-    );
-  }
-
   getUpdatedData(): RequestDataFragment {
     let defaultRules: boolean;
+    let shouldCreateRule: boolean;
     let shouldCreateCustomRule: boolean;
     const alertSetting: RuleAction = parseInt(this.state.alertSetting, 10);
     switch (alertSetting) {
       case RuleAction.DEFAULT_ALERT:
         defaultRules = true;
-        shouldCreateCustomRule = false;
-        break;
-      case RuleAction.CREATE_ALERT_LATER:
-        defaultRules = false;
+        shouldCreateRule = true;
         shouldCreateCustomRule = false;
         break;
       case RuleAction.CUSTOMIZED_ALERTS:
         defaultRules = false;
+        shouldCreateRule = true;
         shouldCreateCustomRule = true;
+        break;
+      case RuleAction.CREATE_ALERT_LATER:
+        defaultRules = false;
+        shouldCreateRule = false;
+        shouldCreateCustomRule = false;
         break;
       default:
         throw new RangeError('Supplied alert creation action is not handled');
@@ -223,6 +226,7 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
 
     return {
       defaultRules,
+      shouldCreateRule,
       shouldCreateCustomRule,
       name: 'Send a notification for new issues',
       conditions:
@@ -261,7 +265,7 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
   }
 
   onLoadAllEndpointsSuccess(): void {
-    const conditions = this.state.conditions?.filter?.(object =>
+    const conditions = this.state.conditions?.filter?.((object: any) =>
       Object.values(METRIC_CONDITION_MAP).includes(object?.id)
     );
 
@@ -289,7 +293,9 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
 
     const newInterval =
       this.props.interval &&
-      intervalChoices.some(intervalChoice => intervalChoice[0] === this.props.interval)
+      intervalChoices.some(
+        (intervalChoice: any) => intervalChoice[0] === this.props.interval
+      )
         ? this.props.interval
         : interval;
 
@@ -313,6 +319,10 @@ class IssueAlertOptions extends DeprecatedAsyncComponent<Props, State> {
           onChange={alertSetting => this.setStateAndUpdateParents({alertSetting})}
           value={this.state.alertSetting}
         />
+        {this.props.notificationProps &&
+          parseInt(this.state.alertSetting, 10) !== RuleAction.CREATE_ALERT_LATER && (
+            <IssueAlertNotificationOptions {...this.props.notificationProps} />
+          )}
       </Content>
     );
   }
@@ -323,6 +333,9 @@ export default withOrganization(IssueAlertOptions);
 const Content = styled('div')`
   padding-top: ${space(2)};
   padding-bottom: ${space(4)};
+  display: flex;
+  flex-direction: column;
+  gap: ${space(2)};
 `;
 
 const CustomizeAlert = styled('div')`

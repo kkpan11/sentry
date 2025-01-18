@@ -21,6 +21,7 @@ export const ON_DEMAND_METRICS_UNSUPPORTED_TAGS = new Set([
   FieldKey.ID,
   FieldKey.MESSAGE,
   FieldKey.PROFILE_ID,
+  FieldKey.RELEASE_STAGE,
   FieldKey.TIMESTAMP_TO_DAY,
   FieldKey.TIMESTAMP_TO_HOUR,
   FieldKey.TIMESTAMP,
@@ -34,3 +35,5 @@ export const ON_DEMAND_METRICS_UNSUPPORTED_TAGS = new Set([
   ...Object.values(StackTags),
   ...Object.values(ErrorTags),
 ]) as Set<FieldKey>;
+
+export const ERROR_ONLY_TAGS = new Set(Object.values(ErrorTags));

@@ -6,8 +6,8 @@ import {openWidgetBuilderOverwriteModal} from 'sentry/actionCreators/modal';
 import type {OverwriteWidgetModalProps} from 'sentry/components/modals/widgetBuilder/overwriteWidgetModal';
 import {t} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
-import {DisplayType, WidgetType} from 'sentry/views/dashboards/types';
+import useOrganization from 'sentry/utils/useOrganization';
+import {DisplayType} from 'sentry/views/dashboards/types';
 import type {WidgetTemplate} from 'sentry/views/dashboards/widgetLibrary/data';
 import {getTopNConvertedDefaultWidgets} from 'sentry/views/dashboards/widgetLibrary/data';
 
@@ -18,7 +18,6 @@ import {Card} from './card';
 interface Props {
   bypassOverwriteModal: boolean;
   onWidgetSelect: (widget: WidgetTemplate) => void;
-  organization: Organization;
   selectedWidgetId: string | null;
 }
 
@@ -26,15 +25,10 @@ export function WidgetLibrary({
   bypassOverwriteModal,
   onWidgetSelect,
   selectedWidgetId,
-  organization,
 }: Props) {
   const theme = useTheme();
-  let defaultWidgets = getTopNConvertedDefaultWidgets();
-  if (!organization.features.includes('dashboards-rh-widget')) {
-    defaultWidgets = defaultWidgets.filter(
-      widget => !(widget.widgetType === WidgetType.RELEASE)
-    );
-  }
+  const organization = useOrganization();
+  const defaultWidgets = getTopNConvertedDefaultWidgets(organization);
 
   function getLibrarySelectionHandler(
     widget: OverwriteWidgetModalProps['widget'],
@@ -59,9 +53,9 @@ export function WidgetLibrary({
       <Header>{t('Widget Library')}</Header>
       <WidgetLibraryWrapper>
         {defaultWidgets.map((widget, index) => {
-          const iconColor = theme.charts.getColorPalette(defaultWidgets.length - 2)[
+          const iconColor = theme.charts.getColorPalette(defaultWidgets.length - 2)?.[
             index
-          ];
+          ]!;
 
           const displayType =
             widget.displayType === DisplayType.TOP_N
@@ -72,6 +66,7 @@ export function WidgetLibrary({
             displayType,
             queries: widget.queries,
             widgetType: widget.widgetType,
+            organization,
           });
 
           const newWidget = {

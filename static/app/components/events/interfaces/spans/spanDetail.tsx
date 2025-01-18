@@ -3,9 +3,9 @@ import styled from '@emotion/styled';
 import omit from 'lodash/omit';
 
 import {Alert} from 'sentry/components/alert';
-import {Button} from 'sentry/components/button';
+import {Button, LinkButton} from 'sentry/components/button';
 import {CopyToClipboardButton} from 'sentry/components/copyToClipboardButton';
-import DateTime from 'sentry/components/dateTime';
+import {DateTime} from 'sentry/components/dateTime';
 import DiscoverButton from 'sentry/components/discoverButton';
 import SpanSummaryButton from 'sentry/components/events/interfaces/spans/spanSummaryButton';
 import FileSize from 'sentry/components/fileSize';
@@ -21,7 +21,6 @@ import {
 } from 'sentry/components/performance/waterfall/rowDetails';
 import Pill from 'sentry/components/pill';
 import Pills from 'sentry/components/pills';
-import {useTransactionProfileId} from 'sentry/components/profiling/transactionProfileIdProvider';
 import {TransactionToProfileButton} from 'sentry/components/profiling/transactionToProfileButton';
 import {
   generateIssueEventTarget,
@@ -30,12 +29,13 @@ import {
 import {ALL_ACCESS_PROJECTS, PAGE_URL_PARAM} from 'sentry/constants/pageFilters';
 import {t, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization} from 'sentry/types';
 import type {EventTransaction} from 'sentry/types/event';
+import type {Organization} from 'sentry/types/organization';
 import {assert} from 'sentry/types/utils';
 import {defined} from 'sentry/utils';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import EventView from 'sentry/utils/discover/eventView';
+import {SavedQueryDatasets} from 'sentry/utils/discover/types';
 import {generateEventSlug} from 'sentry/utils/discover/urls';
 import getDynamicText from 'sentry/utils/getDynamicText';
 import type {
@@ -44,10 +44,10 @@ import type {
 } from 'sentry/utils/performance/quickTrace/types';
 import {useLocation} from 'sentry/utils/useLocation';
 import useProjects from 'sentry/utils/useProjects';
-import {CustomMetricsEventData} from 'sentry/views/ddm/customMetricsEventData';
+import {hasDatasetSelector} from 'sentry/views/dashboards/utils';
 import {spanDetailsRouteWithQuery} from 'sentry/views/performance/transactionSummary/transactionSpans/spanDetails/utils';
 import {transactionSummaryRouteWithQuery} from 'sentry/views/performance/transactionSummary/utils';
-import {getPerformanceDuration} from 'sentry/views/performance/utils';
+import {getPerformanceDuration} from 'sentry/views/performance/utils/getPerformanceDuration';
 
 import {OpsDot} from '../../opsBreakdown';
 
@@ -104,7 +104,7 @@ type Props = {
 function SpanDetail(props: Props) {
   const [errorsOpened, setErrorsOpened] = useState(false);
   const location = useLocation();
-  const profileId = useTransactionProfileId();
+  const profileId = props.event.contexts.profile?.profile_id;
   const {projects} = useProjects();
   const project = projects.find(p => p.id === props.event.projectID);
 
@@ -130,7 +130,7 @@ function SpanDetail(props: Props) {
       // TODO: Amend size to use theme when we eventually refactor LoadingIndicator
       // 12px is consistent with theme.iconSizes['xs'] but theme returns a string.
       return (
-        <StyledDiscoverButton size="xs" disabled>
+        <StyledDiscoverButton href="#" size="xs" disabled>
           <StyledLoadingIndicator size={12} />
         </StyledDiscoverButton>
       );
@@ -178,7 +178,11 @@ function SpanDetail(props: Props) {
       <StyledDiscoverButton
         data-test-id="view-child-transactions"
         size="xs"
-        to={childrenEventView.getResultsViewUrlTarget(organization.slug)}
+        to={childrenEventView.getResultsViewUrlTarget(
+          organization.slug,
+          false,
+          hasDatasetSelector(organization) ? SavedQueryDatasets.TRANSACTIONS : undefined
+        )}
       >
         {t('View Children')}
       </StyledDiscoverButton>
@@ -192,7 +196,7 @@ function SpanDetail(props: Props) {
       return null;
     }
 
-    const childTransaction = childTransactions[0];
+    const childTransaction = childTransactions[0]!;
 
     const transactionResult: TransactionResult = {
       'project.name': childTransaction.project_slug,
@@ -224,12 +228,12 @@ function SpanDetail(props: Props) {
 
           return (
             <ButtonGroup>
-              <StyledButton data-test-id="view-child-transaction" size="xs" to={to}>
+              <LinkButton data-test-id="view-child-transaction" size="xs" to={to}>
                 {t('View Transaction')}
-              </StyledButton>
-              <StyledButton size="xs" to={target}>
+              </LinkButton>
+              <LinkButton size="xs" to={target}>
                 {t('View Summary')}
-              </StyledButton>
+              </LinkButton>
             </ButtonGroup>
           );
         }}
@@ -251,9 +255,9 @@ function SpanDetail(props: Props) {
     }
 
     return (
-      <StyledButton size="xs" to={generateTraceTarget(event, organization)}>
+      <LinkButton size="xs" to={generateTraceTarget(event, organization, location)}>
         {t('View Trace')}
-      </StyledButton>
+      </LinkButton>
     );
   }
 
@@ -269,7 +273,7 @@ function SpanDetail(props: Props) {
     return (
       <ButtonGroup>
         <SpanSummaryButton event={event} organization={organization} span={span} />
-        <StyledButton
+        <LinkButton
           size="xs"
           to={spanDetailsRouteWithQuery({
             orgSlug: organization.slug,
@@ -280,7 +284,7 @@ function SpanDetail(props: Props) {
           })}
         >
           {t('View Similar Spans')}
-        </StyledButton>
+        </LinkButton>
       </ButtonGroup>
     );
   }
@@ -357,20 +361,23 @@ function SpanDetail(props: Props) {
     );
   }
 
-  function partitionSizes(data): {
+  function partitionSizes(data: any): {
     nonSizeKeys: {[key: string]: unknown};
     sizeKeys: {[key: string]: number};
   } {
-    const sizeKeys = SIZE_DATA_KEYS.reduce((keys, key) => {
-      if (data.hasOwnProperty(key) && defined(data[key])) {
-        try {
-          keys[key] = parseInt(data[key], 10);
-        } catch (e) {
-          keys[key] = data[key];
+    const sizeKeys = SIZE_DATA_KEYS.reduce(
+      (keys, key) => {
+        if (data.hasOwnProperty(key) && defined(data[key])) {
+          try {
+            keys[key] = parseInt(data[key], 10);
+          } catch (e) {
+            keys[key] = data[key];
+          }
         }
-      }
-      return keys;
-    }, {});
+        return keys;
+      },
+      {} as Record<string, number>
+    );
 
     const nonSizeKeys = {...data};
     SIZE_DATA_KEYS.forEach(key => delete nonSizeKeys[key]);
@@ -392,24 +399,15 @@ function SpanDetail(props: Props) {
   }
 
   function renderSpanDetails() {
-    const {span, event, organization, resetCellMeasureCache, scrollToHash} = props;
+    const {span, event, organization, scrollToHash} = props;
 
     if (isGapSpan(span)) {
       return (
         <SpanDetails>
           {organization.features.includes('profiling') ? (
-            <GapSpanDetails
-              event={event}
-              span={span}
-              resetCellMeasureCache={resetCellMeasureCache}
-            />
+            <GapSpanDetails event={event} span={span} />
           ) : (
-            <InlineDocs
-              orgSlug={organization.slug}
-              platform={event.sdk?.name || ''}
-              projectSlug={event?.projectSlug ?? ''}
-              resetCellMeasureCache={resetCellMeasureCache}
-            />
+            <InlineDocs platform={event.sdk?.name || ''} />
           )}
         </SpanDetails>
       );
@@ -577,17 +575,11 @@ function SpanDetail(props: Props) {
               )}
               {unknownKeys.map(key => (
                 <Row title={key} key={key}>
-                  {maybeStringify(span[key])}
+                  {maybeStringify(span[key as never])}
                 </Row>
               ))}
             </tbody>
           </table>
-          {span._metrics_summary && (
-            <CustomMetricsEventData
-              metricsSummary={span._metrics_summary}
-              startTimestamp={span.start_timestamp}
-            />
-          )}
         </SpanDetails>
       </Fragment>
     );
@@ -623,8 +615,6 @@ const StyledDiscoverButton = styled(DiscoverButton)`
   right: ${space(0.5)};
 `;
 
-const StyledButton = styled(Button)``;
-
 export const SpanDetailContainer = styled('div')`
   border-bottom: 1px solid ${p => p.theme.border};
   cursor: auto;
@@ -651,10 +641,10 @@ const StyledLoadingIndicator = styled(LoadingIndicator)`
 
 const StyledText = styled('p')`
   font-size: ${p => p.theme.fontSizeMedium};
-  margin: ${space(2)} ${space(0)};
+  margin: ${space(2)} 0;
 `;
 
-function TextTr({children}) {
+function TextTr({children}: any) {
   return (
     <tr>
       <td className="key" />

@@ -1,21 +1,17 @@
-import copy
-
+import orjson
 import responses
 
 from sentry.integrations.bitbucket.issues import ISSUE_TYPES, PRIORITIES
-from sentry.models.integrations.external_issue import ExternalIssue
-from sentry.services.hybrid_cloud.integration import integration_service
+from sentry.integrations.models.external_issue import ExternalIssue
+from sentry.integrations.services.integration import integration_service
 from sentry.testutils.cases import APITestCase
-from sentry.testutils.factories import DEFAULT_EVENT_DATA
-from sentry.testutils.helpers.datetime import before_now, iso_format
-from sentry.testutils.silo import region_silo_test
+from sentry.testutils.factories import EventType
+from sentry.testutils.helpers.datetime import before_now
 from sentry.testutils.skips import requires_snuba
-from sentry.utils import json
 
 pytestmark = [requires_snuba]
 
 
-@region_silo_test
 class BitbucketIssueTest(APITestCase):
     def setUp(self):
         self.base_url = "https://api.bitbucket.org"
@@ -37,15 +33,15 @@ class BitbucketIssueTest(APITestCase):
         )
         assert org_integration is not None
         self.org_integration = org_integration
-        min_ago = iso_format(before_now(minutes=1))
+        min_ago = before_now(minutes=1).isoformat()
         event = self.store_event(
             data={
                 "event_id": "a" * 32,
                 "message": "message",
                 "timestamp": min_ago,
-                "stacktrace": copy.deepcopy(DEFAULT_EVENT_DATA["stacktrace"]),
             },
             project_id=self.project.id,
+            default_event_type=EventType.DEFAULT,
         )
         self.group = event.group
         self.repo_choices = [
@@ -101,7 +97,7 @@ class BitbucketIssueTest(APITestCase):
 
         request = responses.calls[0].request
         assert responses.calls[0].response.status_code == 201
-        payload = json.loads(request.body)
+        payload = orjson.loads(request.body)
         assert payload == {"content": {"raw": comment["comment"]}}
 
     @responses.activate

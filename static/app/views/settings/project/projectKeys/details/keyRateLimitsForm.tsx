@@ -1,4 +1,3 @@
-import type {RouteComponentProps} from 'react-router';
 import styled from '@emotion/styled';
 import sortBy from 'lodash/sortBy';
 
@@ -14,9 +13,11 @@ import PanelBody from 'sentry/components/panels/panelBody';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import {t, tct, tn} from 'sentry/locale';
 import {space} from 'sentry/styles/space';
-import type {Organization, ProjectKey} from 'sentry/types';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import type {Organization} from 'sentry/types/organization';
+import type {ProjectKey} from 'sentry/types/project';
 import {defined} from 'sentry/utils';
-import {getExactDuration} from 'sentry/utils/formatters';
+import {getExactDuration} from 'sentry/utils/duration/getExactDuration';
 
 const PREDEFINED_RATE_LIMIT_VALUES = [
   0, 60, 300, 900, 3600, 7200, 14400, 21600, 43200, 86400,
@@ -93,7 +94,7 @@ function KeyRateLimitsForm({data, disabled, organization, params}: Props) {
   const {keyId, projectId} = params;
   const apiEndpoint = `/projects/${organization.slug}/${projectId}/keys/${keyId}/`;
 
-  const disabledAlert = ({features}) => (
+  const disabledAlert = ({features}: any) => (
     <FeatureDisabled
       alert={PanelAlert}
       features={features}
@@ -139,7 +140,7 @@ function KeyRateLimitsForm({data, disabled, organization, params}: Props) {
                 name="rateLimit"
                 label={t('Rate Limit')}
                 disabled={disabled || !hasFeature}
-                validate={({form}) => {
+                validate={({form}: any) => {
                   // TODO(TS): is validate actually doing anything because it's an unexpected prop
                   const isValid =
                     form?.rateLimit &&
@@ -164,7 +165,7 @@ function KeyRateLimitsForm({data, disabled, organization, params}: Props) {
                 )}
                 inline={false}
               >
-                {({onChange, onBlur, value}) => {
+                {({onChange, onBlur, value}: any) => {
                   const window = typeof value === 'object' ? value.window : undefined;
                   return (
                     <RateLimitRow>

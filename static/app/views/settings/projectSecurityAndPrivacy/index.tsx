@@ -9,7 +9,8 @@ import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import projectSecurityAndPrivacyGroups from 'sentry/data/forms/projectSecurityAndPrivacyGroups';
 import {t, tct} from 'sentry/locale';
 import ProjectsStore from 'sentry/stores/projectsStore';
-import type {Organization, Project} from 'sentry/types';
+import type {Organization} from 'sentry/types/organization';
+import type {Project} from 'sentry/types/project';
 import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
 import PermissionAlert from 'sentry/views/settings/project/permissionAlert';
 
@@ -52,7 +53,7 @@ export default function ProjectSecurityAndPrivacy({organization, project}: Props
         onSubmitError={() => addErrorMessage('Unable to save change')}
       >
         <JsonForm
-          additionalFieldProps={{organization}}
+          additionalFieldProps={{organization, project}}
           features={features}
           disabled={!hasAccess}
           forms={projectSecurityAndPrivacyGroups}

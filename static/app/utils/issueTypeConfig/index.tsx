@@ -1,17 +1,19 @@
 import {t} from 'sentry/locale';
-import type {Project} from 'sentry/types';
-import {IssueCategory, IssueType} from 'sentry/types';
+import {IssueCategory, IssueType} from 'sentry/types/group';
+import type {Project} from 'sentry/types/project';
 import cronConfig from 'sentry/utils/issueTypeConfig/cronConfig';
 import {
   errorConfig,
   getErrorHelpResource,
 } from 'sentry/utils/issueTypeConfig/errorConfig';
+import metricIssueConfig from 'sentry/utils/issueTypeConfig/metricIssueConfig';
 import performanceConfig from 'sentry/utils/issueTypeConfig/performanceConfig';
 import replayConfig from 'sentry/utils/issueTypeConfig/replayConfig';
 import type {
   IssueCategoryConfigMapping,
   IssueTypeConfig,
 } from 'sentry/utils/issueTypeConfig/types';
+import uptimeConfig from 'sentry/utils/issueTypeConfig/uptimeConfig';
 
 type Config = Record<IssueCategory, IssueCategoryConfigMapping>;
 
@@ -30,31 +32,47 @@ const BASE_CONFIG: IssueTypeConfig = {
     deleteAndDiscard: {enabled: false},
     merge: {enabled: false},
     ignore: {enabled: false},
+    resolve: {enabled: true},
     resolveInRelease: {enabled: true},
     share: {enabled: false},
   },
+  customCopy: {
+    resolution: t('Resolved'),
+    allEvents: t('All Events'),
+  },
   attachments: {enabled: false},
+  autofix: false,
+  eventAndUserCounts: {enabled: true},
   events: {enabled: true},
+  logLevel: {enabled: false},
   mergedIssues: {enabled: false},
+  filterAndSearchHeader: {enabled: true},
+  performanceDurationRegression: {enabled: false},
+  profilingDurationRegression: {enabled: false},
   regression: {enabled: false},
   replays: {enabled: false},
   showFeedbackWidget: false,
-  stats: {enabled: true},
   similarIssues: {enabled: false},
+  spanEvidence: {enabled: false},
+  stacktrace: {enabled: true},
+  stats: {enabled: true},
   tags: {enabled: true},
+  tagsTab: {enabled: true},
   userFeedback: {enabled: false},
   discover: {enabled: true},
   evidence: {title: t('Evidence')},
   resources: null,
   usesIssuePlatform: true,
+  issueSummary: {enabled: false},
 };
 
 const issueTypeConfig: Config = {
   [IssueCategory.ERROR]: errorConfig,
   [IssueCategory.PERFORMANCE]: performanceConfig,
-  [IssueCategory.PROFILE]: performanceConfig,
   [IssueCategory.CRON]: cronConfig,
   [IssueCategory.REPLAY]: replayConfig,
+  [IssueCategory.UPTIME]: uptimeConfig,
+  [IssueCategory.METRIC_ALERT]: metricIssueConfig,
 };
 
 /**
@@ -67,9 +85,13 @@ export function shouldShowCustomErrorResourceConfig(
   project: Project
 ): boolean {
   const isErrorIssue = 'issueType' in params && params.issueType === IssueType.ERROR;
+  const isReplayHydrationIssue =
+    'issueType' in params && params.issueType === IssueType.REPLAY_HYDRATION_ERROR;
   const hasTitle = 'title' in params && !!params.title;
   return (
-    isErrorIssue && hasTitle && !!getErrorHelpResource({title: params.title!, project})
+    (isErrorIssue || isReplayHydrationIssue) &&
+    hasTitle &&
+    !!getErrorHelpResource({title: params.title!, project})
   );
 }
 
@@ -96,7 +118,7 @@ export const getIssueCategoryAndTypeFromOccurrenceType = (
 export const getConfigForIssueType = (
   params: GetConfigForIssueTypeParams,
   project: Project
-) => {
+): IssueTypeConfig => {
   const {issueCategory, issueType, title} =
     'eventOccurrenceType' in params
       ? getIssueCategoryAndTypeFromOccurrenceType(params.eventOccurrenceType as number)

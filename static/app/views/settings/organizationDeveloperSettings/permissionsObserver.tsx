@@ -5,7 +5,8 @@ import Panel from 'sentry/components/panels/panel';
 import PanelBody from 'sentry/components/panels/panelBody';
 import PanelHeader from 'sentry/components/panels/panelHeader';
 import {t} from 'sentry/locale';
-import type {Permissions, Scope, WebhookEvent} from 'sentry/types';
+import type {Scope} from 'sentry/types/core';
+import type {Permissions, WebhookEvent} from 'sentry/types/integrations';
 import {
   comparePermissionLevels,
   toResourcePermissions,
@@ -68,7 +69,9 @@ export default class PermissionsObserver extends Component<Props, State> {
     Object.keys(permissions).some((resource_name: string) => {
       if (
         comparePermissionLevels(
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           permissions[resource_name],
+          // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
           new_permissions[resource_name]
         ) > 0
       ) {
@@ -92,7 +95,7 @@ export default class PermissionsObserver extends Component<Props, State> {
       return (
         <Alert type="warning" showIcon>
           {t(
-            'You are going to increase privileges for this integration. Organization members who already had access to the Client Secret may gain extra permissions due to this change. If this is not what you are expecting, consider re-creating the integration.'
+            'You are going to increase privileges for this integration. Organization members who already had access to the Client Secret may gain extra permissions due to this change. If this is not what you are expecting, consider rotating the Client Secret below.'
           )}
         </Alert>
       );

@@ -1,11 +1,13 @@
-import type {RouteComponent, RouteComponentProps} from 'react-router';
-import {formatPattern} from 'react-router';
+import {generatePath} from 'react-router-dom';
+import trim from 'lodash/trim';
 import trimEnd from 'lodash/trimEnd';
 import trimStart from 'lodash/trimStart';
 
+import Redirect from 'sentry/components/redirect';
+import ConfigStore from 'sentry/stores/configStore';
+import type {RouteComponent, RouteComponentProps} from 'sentry/types/legacyReactRouter';
 import recreateRoute from 'sentry/utils/recreateRoute';
-import Redirect from 'sentry/utils/redirect';
-import {normalizeUrl} from 'sentry/utils/withDomainRequired';
+import normalizeUrl from 'sentry/utils/url/normalizeUrl';
 
 import useOrganization from './useOrganization';
 
@@ -32,7 +34,7 @@ function withDomainRedirect<P extends RouteComponentProps<{}, {}>>(
   WrappedComponent: RouteComponent
 ) {
   return function WithDomainRedirectWrapper(props: P) {
-    const {customerDomain, links} = window.__initialData;
+    const {customerDomain, links, features} = ConfigStore.getState();
     const {sentryUrl} = links;
     const currentOrganization = useOrganization({allowNull: true});
 
@@ -47,7 +49,7 @@ function withDomainRedirect<P extends RouteComponentProps<{}, {}>>(
         currentOrganization &&
         customerDomain.subdomain &&
         (currentOrganization.slug !== customerDomain.subdomain ||
-          !currentOrganization.features.includes('customer-domains'))
+          !features.has('system:multi-region'))
       ) {
         window.location.replace(redirectURL);
         return null;
@@ -58,6 +60,7 @@ function withDomainRedirect<P extends RouteComponentProps<{}, {}>>(
       // Regenerate the full route with the :orgId parameter omitted.
       const newParams = {...params};
       Object.keys(params).forEach(param => {
+        // @ts-ignore TS(7053): Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
         newParams[param] = `:${param}`;
       });
       const fullRoute = recreateRoute('', {routes, params: newParams});
@@ -68,8 +71,8 @@ function withDomainRedirect<P extends RouteComponentProps<{}, {}>>(
         return <WrappedComponent {...props} />;
       }
 
-      const orglessRedirectPath = formatPattern(orglessSlugRoute, params);
-      const redirectOrgURL = `/${trimStart(orglessRedirectPath, '/')}${
+      const orglessRedirectPath = generatePath(orglessSlugRoute, params);
+      const redirectOrgURL = `/${trim(orglessRedirectPath, '/')}/${
         window.location.search
       }${window.location.hash}`;
 

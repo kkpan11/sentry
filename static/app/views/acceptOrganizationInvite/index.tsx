@@ -1,18 +1,19 @@
 import {Fragment} from 'react';
-import type {RouteComponentProps} from 'react-router';
-import {browserHistory} from 'react-router';
 import styled from '@emotion/styled';
 
 import {logout} from 'sentry/actionCreators/account';
 import {Alert} from 'sentry/components/alert';
-import {Button} from 'sentry/components/button';
+import {Button, LinkButton} from 'sentry/components/button';
+import DeprecatedAsyncComponent from 'sentry/components/deprecatedAsyncComponent';
 import ExternalLink from 'sentry/components/links/externalLink';
 import Link from 'sentry/components/links/link';
 import NarrowLayout from 'sentry/components/narrowLayout';
+import SentryDocumentTitle from 'sentry/components/sentryDocumentTitle';
 import {t, tct} from 'sentry/locale';
 import ConfigStore from 'sentry/stores/configStore';
 import {space} from 'sentry/styles/space';
-import DeprecatedAsyncView from 'sentry/views/deprecatedAsyncView';
+import type {RouteComponentProps} from 'sentry/types/legacyReactRouter';
+import {browserHistory} from 'sentry/utils/browserHistory';
 import SettingsPageHeader from 'sentry/views/settings/components/settingsPageHeader';
 
 type InviteDetails = {
@@ -20,7 +21,6 @@ type InviteDetails = {
   hasAuthProvider: boolean;
   needs2fa: boolean;
   needsAuthentication: boolean;
-  needsEmailVerification: boolean;
   orgSlug: string;
   requireSso: boolean;
   ssoProvider?: string;
@@ -28,13 +28,13 @@ type InviteDetails = {
 
 type Props = RouteComponentProps<{memberId: string; token: string; orgId?: string}, {}>;
 
-type State = DeprecatedAsyncView['state'] & {
+type State = DeprecatedAsyncComponent['state'] & {
   acceptError: boolean | undefined;
   accepting: boolean | undefined;
   inviteDetails: InviteDetails;
 };
 
-class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
+class AcceptOrganizationInvite extends DeprecatedAsyncComponent<Props, State> {
   disableErrorReport = false;
 
   get orgSlug(): string | null {
@@ -42,14 +42,14 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
     if (params.orgId) {
       return params.orgId;
     }
-    const {customerDomain} = window.__initialData;
+    const customerDomain = ConfigStore.get('customerDomain');
     if (customerDomain?.subdomain) {
       return customerDomain.subdomain;
     }
     return null;
   }
 
-  getEndpoints(): ReturnType<DeprecatedAsyncView['getEndpoints']> {
+  getEndpoints(): ReturnType<DeprecatedAsyncComponent['getEndpoints']> {
     const {memberId, token} = this.props.params;
     if (this.orgSlug) {
       return [['inviteDetails', `/accept-invite/${this.orgSlug}/${memberId}/${token}/`]];
@@ -57,14 +57,15 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
     return [['inviteDetails', `/accept-invite/${memberId}/${token}/`]];
   }
 
-  getTitle() {
-    return t('Accept Organization Invite');
-  }
-
-  handleLogout = async (e: React.MouseEvent) => {
+  handleLogout = (e: React.MouseEvent) => {
     e.preventDefault();
-    await logout(this.api);
-    window.location.replace('/auth/login/');
+    logout(this.api);
+  };
+
+  handleLogoutAndRetry = (e: React.MouseEvent) => {
+    const {memberId, token} = this.props.params;
+    e.preventDefault();
+    logout(this.api, `/accept/${memberId}/${token}/`);
   };
 
   handleAcceptInvite = async () => {
@@ -154,22 +155,22 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
         <Actions>
           <ActionsLeft>
             {inviteDetails.hasAuthProvider && (
-              <Button
+              <LinkButton
                 data-test-id="sso-login"
                 priority="primary"
                 href={`/auth/login/${inviteDetails.orgSlug}/`}
               >
                 {t('Join with %s', inviteDetails.ssoProvider)}
-              </Button>
+              </LinkButton>
             )}
             {!inviteDetails.requireSso && (
-              <Button
+              <LinkButton
                 data-test-id="create-account"
                 priority="primary"
                 href="/auth/register/"
               >
                 {t('Create a new account')}
-              </Button>
+              </LinkButton>
             )}
           </ActionsLeft>
           {!inviteDetails.requireSso && (
@@ -198,29 +199,9 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
           )}
         </p>
         <Actions>
-          <Button priority="primary" to="/settings/account/security/">
+          <LinkButton priority="primary" to="/settings/account/security/">
             {t('Configure Two-Factor Auth')}
-          </Button>
-        </Actions>
-      </Fragment>
-    );
-  }
-
-  get warningEmailVerification() {
-    const {inviteDetails} = this.state;
-
-    return (
-      <Fragment>
-        <p data-test-id="email-verification-warning">
-          {tct(
-            'To continue, [orgSlug] requires all members to verify their email address.',
-            {orgSlug: inviteDetails.orgSlug}
-          )}
-        </p>
-        <Actions>
-          <Button priority="primary" to="/settings/account/emails/">
-            {t('Verify Email Address')}
-          </Button>
+          </LinkButton>
         </Actions>
       </Fragment>
     );
@@ -247,13 +228,13 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
         <Actions>
           <ActionsLeft>
             {inviteDetails.hasAuthProvider && !inviteDetails.requireSso && (
-              <Button
+              <LinkButton
                 data-test-id="sso-login"
                 priority="primary"
                 href={`/auth/login/${inviteDetails.orgSlug}/`}
               >
                 {t('Join with %s', inviteDetails.ssoProvider)}
-              </Button>
+              </LinkButton>
             )}
 
             <Button
@@ -271,10 +252,28 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
   }
 
   renderError() {
+    /**
+     * NOTE (mifu67): this error view could show up for multiple reasons, including:
+     * invite link expired, signed into account that is already in the inviting
+     * org, and invite not approved. Previously, the message seemed to indivate that
+     * the link had expired, regardless of which error prompted it, so update the
+     * error message to be a little more helpful.
+     */
     return (
       <NarrowLayout>
         <Alert type="warning">
-          {t('This organization invite link is no longer valid.')}
+          {tct(
+            'This organization invite link is invalid. It may be expired, or you may need to [switchLink:sign in with a different account].',
+            {
+              switchLink: (
+                <Link
+                  to=""
+                  data-test-id="existing-member-link"
+                  onClick={this.handleLogoutAndRetry}
+                />
+              ),
+            }
+          )}
         </Alert>
       </NarrowLayout>
     );
@@ -285,6 +284,7 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
 
     return (
       <NarrowLayout>
+        <SentryDocumentTitle title={t('Accept Organization Invite')} />
         <SettingsPageHeader title={t('Accept organization invite')} />
         {acceptError && (
           <Alert type="error">
@@ -302,11 +302,9 @@ class AcceptOrganizationInvite extends DeprecatedAsyncView<Props, State> {
             ? this.existingMemberAlert
             : inviteDetails.needs2fa
               ? this.warning2fa
-              : inviteDetails.needsEmailVerification
-                ? this.warningEmailVerification
-                : inviteDetails.requireSso
-                  ? this.authenticationActions
-                  : this.acceptActions}
+              : inviteDetails.requireSso
+                ? this.authenticationActions
+                : this.acceptActions}
       </NarrowLayout>
     );
   }

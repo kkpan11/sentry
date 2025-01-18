@@ -2,14 +2,14 @@ import {InstallWizardFixture} from 'sentry-fixture/installWizard';
 import {OrganizationFixture} from 'sentry-fixture/organization';
 
 import {initializeOrg} from 'sentry-test/initializeOrg';
-import {render, screen, waitFor} from 'sentry-test/reactTestingLibrary';
+import {act, render, screen, waitFor} from 'sentry-test/reactTestingLibrary';
 
 import ConfigStore from 'sentry/stores/configStore';
 import HookStore from 'sentry/stores/hookStore';
 import OrganizationsStore from 'sentry/stores/organizationsStore';
 import App from 'sentry/views/app';
 
-function HookWrapper(props) {
+function HookWrapper(props: any) {
   return (
     <div data-test-id="hook-wrapper">
       {props.children}
@@ -99,6 +99,34 @@ describe('App', function () {
     user.flags.newsletter_consent_prompt = false;
   });
 
+  it('renders BeaconConsent', async function () {
+    ConfigStore.set('shouldShowBeaconConsentPrompt', true);
+    ConfigStore.get('user').isSuperuser = true;
+    ConfigStore.set('isSelfHosted', true);
+
+    MockApiClient.addMockResponse({
+      url: '/internal/health/',
+      body: {
+        problems: [],
+      },
+    });
+
+    render(
+      <App {...routerProps}>
+        <div>placeholder content</div>
+      </App>
+    );
+
+    await waitFor(() => OrganizationsStore.getAll().length === 1);
+
+    const beaconConsentText = await screen.findByText(
+      'We have made some updates to our self-hosted beacon broadcast system, and just need to get a quick answer from you.',
+      undefined,
+      {timeout: 2000, interval: 100}
+    );
+    expect(beaconConsentText).toBeInTheDocument();
+  });
+
   it('renders PartnershipAgreement', async function () {
     ConfigStore.set('partnershipAgreementPrompt', {
       partnerDisplayName: 'Foo',
@@ -182,7 +210,7 @@ describe('App', function () {
 
     await waitFor(() => OrganizationsStore.getAll().length === 1);
     expect(screen.queryByText('placeholder content')).not.toBeInTheDocument();
-    expect(sentryUrl).toEqual('https://sentry.io');
+    expect(sentryUrl).toBe('https://sentry.io');
     expect(window.location.replace).toHaveBeenCalledWith('https://sentry.io');
     expect(window.location.replace).toHaveBeenCalledTimes(1);
   });
@@ -209,7 +237,7 @@ describe('App', function () {
         <div>placeholder content</div>
       </App>
     );
-    ConfigStore.config.isSelfHosted = restore;
+    act(() => ConfigStore.set('isSelfHosted', restore));
 
     await waitFor(() => OrganizationsStore.getAll().length === 1);
 

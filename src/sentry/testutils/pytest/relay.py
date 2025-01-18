@@ -18,7 +18,9 @@ _log = logging.getLogger(__name__)
 
 
 # This helps the Relay CI to specify the generated Docker build before it is published
-RELAY_TEST_IMAGE = environ.get("RELAY_TEST_IMAGE", "us.gcr.io/sentryio/relay:nightly")
+RELAY_TEST_IMAGE = environ.get(
+    "RELAY_TEST_IMAGE", "us-central1-docker.pkg.dev/sentryio/relay/relay:nightly"
+)
 
 
 def _relay_server_container_name():
@@ -45,7 +47,7 @@ def _remove_container_if_exists(docker_client, container_name):
             pass  # could not remove the container nothing to do about it
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def relay_server_setup(live_server, tmpdir_factory):
     prefix = "test_relay_config_{}_".format(
         datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
@@ -67,15 +69,20 @@ def relay_server_setup(live_server, tmpdir_factory):
     relay_port = 33331
 
     redis_db = TEST_REDIS_DB
+    use_new_dev_services = environ.get("USE_NEW_DEVSERVICES", "0") == "1"
     from sentry.relay import projectconfig_cache
+    from sentry.relay.projectconfig_cache.redis import RedisProjectConfigCache
 
-    assert redis_db == projectconfig_cache.backend.cluster.connection_pool.connection_kwargs["db"]
+    projectconfig_backend = projectconfig_cache.backend.test_only__downcast_to(
+        RedisProjectConfigCache
+    )
+    assert redis_db == projectconfig_backend.cluster.connection_pool.connection_kwargs["db"]
 
     template_vars = {
         "SENTRY_HOST": f"http://host.docker.internal:{port}/",
         "RELAY_PORT": relay_port,
-        "KAFKA_HOST": "sentry_kafka",
-        "REDIS_HOST": "sentry_redis",
+        "KAFKA_HOST": "kafka-kafka-1" if use_new_dev_services else "sentry_kafka",
+        "REDIS_HOST": "redis-redis-1" if use_new_dev_services else "sentry_redis",
         "REDIS_DB": redis_db,
     }
 
@@ -100,7 +107,7 @@ def relay_server_setup(live_server, tmpdir_factory):
     options = {
         "image": RELAY_TEST_IMAGE,
         "ports": {"%s/tcp" % relay_port: relay_port},
-        "network": "sentry",
+        "network": "devservices" if use_new_dev_services else "sentry",
         "detach": True,
         "name": container_name,
         "volumes": {config_path: {"bind": "/etc/relay"}},

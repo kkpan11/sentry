@@ -7,8 +7,6 @@ import {
 } from 'sentry/utils/replays/getReplayEvent';
 import hydrateBreadcrumbs from 'sentry/utils/replays/hydrateBreadcrumbs';
 
-const mockRRWebFrames = []; // This is only needed for replay.hydrate-error breadcrumbs.
-
 const frames = hydrateBreadcrumbs(
   ReplayRecordFixture({
     started_at: new Date('2022-05-04T19:41:30.00Z'),
@@ -34,11 +32,10 @@ const frames = hydrateBreadcrumbs(
       timestamp: new Date('2022-05-04T19:47:59.915000Z'),
       message: 'index 4',
     }),
-  ],
-  mockRRWebFrames
+  ]
 );
 
-const CURRENT_OFFSET_MS = frames[0].offsetMs + 15000;
+const CURRENT_OFFSET_MS = frames[0]!.offsetMs + 15000;
 
 describe('getNextReplayFrame', () => {
   it('should return the next crumb', () => {
@@ -50,10 +47,10 @@ describe('getNextReplayFrame', () => {
     expect(result).toEqual(frames[1]);
   });
 
-  it('should return the next crumb when the the list is not sorted', () => {
+  it('should return the next crumb when the list is not sorted', () => {
     const [one, two, three, four, five] = frames;
     const result = getNextReplayFrame({
-      frames: [one, four, five, three, two],
+      frames: [one!, four!, five!, three!, two!],
       targetOffsetMs: CURRENT_OFFSET_MS,
     });
 
@@ -88,7 +85,7 @@ describe('getNextReplayFrame', () => {
   });
 
   it('should return the next frame when a timestamp exactly matches', () => {
-    const exactTime = frames[1].offsetMs;
+    const exactTime = frames[1]!.offsetMs;
     const result = getNextReplayFrame({
       frames,
       targetOffsetMs: exactTime,
@@ -99,7 +96,7 @@ describe('getNextReplayFrame', () => {
   });
 
   it('should return the same frame if timestamps exactly match and allowMatch is enabled', () => {
-    const exactTime = frames[1].offsetMs;
+    const exactTime = frames[1]!.offsetMs;
     const result = getNextReplayFrame({
       frames,
       targetOffsetMs: exactTime,
@@ -123,7 +120,7 @@ describe('getPrevReplayFrame', () => {
   it('should return the previous crumb when the list is not sorted', () => {
     const [one, two, three, four, five] = frames;
     const result = getPrevReplayFrame({
-      frames: [one, four, five, three, two],
+      frames: [one!, four!, five!, three!, two!],
       targetOffsetMs: CURRENT_OFFSET_MS,
     });
 
@@ -158,7 +155,7 @@ describe('getPrevReplayFrame', () => {
   });
 
   it('should return the prev frame if timestamp exactly matches', () => {
-    const exactTime = frames[1].offsetMs;
+    const exactTime = frames[1]!.offsetMs;
     const result = getPrevReplayFrame({
       frames,
       targetOffsetMs: exactTime,
@@ -169,7 +166,7 @@ describe('getPrevReplayFrame', () => {
   });
 
   it('should return the same frame if timestamps exactly match and allowExact is enabled', () => {
-    const exactTime = frames[1].offsetMs;
+    const exactTime = frames[1]!.offsetMs;
     const result = getPrevReplayFrame({
       frames,
       targetOffsetMs: exactTime,
